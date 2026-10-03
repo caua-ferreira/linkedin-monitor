@@ -1,0 +1,45 @@
+{
+  "name": "notion-linkedin-editorial",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "dev": "tsx src/cli/dryRun.ts",
+    "dry-run": "tsx src/cli/dryRun.ts",
+    "dry-run:demo": "tsx src/cli/dryRun.ts --demo",
+    "notion:check": "tsx src/cli/checkNotion.ts",
+    "scheduler": "tsx src/cli/runScheduler.ts",
+    "test": "vitest run",
+    "lint": "eslint . && tsc --noEmit",
+    "analytics:import": "tsx src/cli/importLinkedinReport.ts",
+    "collect": "tsx src/cli/importLinkedinReport.ts",
+    "auth:start": "tsx src/cli/startAuth.ts",
+    "auth:status": "tsx src/cli/authStatus.ts",
+    "build": "tsc"
+  },
+  "dependencies": {
+    "date-fns": "^4.4.0",
+    "date-fns-tz": "^3.2.0",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "pino": "^10.3.1",
+    "xlsx": "^0.18.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.3",
+    "@types/supertest": "^7.2.1",
+    "eslint": "^10.11.0",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.0",
+    "vercel": "^62.2.0",
+    "vitest": "^4.1.11"
+  }
+}
