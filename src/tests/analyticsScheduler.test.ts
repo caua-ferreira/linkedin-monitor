@@ -2,6 +2,7 @@ import { it, expect, vi } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import pino from 'pino';
+import type { Logger } from 'pino';
 import { applyMigrations } from '../storage/schema.js';
 import { PublicationRepository } from '../storage/publicationRepository.js';
 import { AnalyticsScheduler } from '../scheduling/analyticsScheduler.js';
@@ -37,7 +38,7 @@ it('detecta janela 1h como due', () => {
   insertPublished(pubRepo, publishedAt);
 
   const messages: unknown[] = [];
-  const logger = pino({ level: 'info' }, { write: (s) => messages.push(JSON.parse(s)) });
+  const logger = pino({ level: 'info' }, { write: (s: string) => messages.push(JSON.parse(s)) }) as unknown as Logger;
 
   new AnalyticsScheduler(pubRepo, logger).checkDueAnalytics();
 
@@ -54,7 +55,7 @@ it('não emite evento se post publicado há poucos minutos', () => {
   insertPublished(pubRepo, publishedAt);
 
   const infoSpy = vi.fn();
-  const logger = { info: infoSpy, error: vi.fn(), warn: vi.fn() } as unknown as ReturnType<typeof pino>;
+  const logger = { info: infoSpy, error: vi.fn(), warn: vi.fn() } as unknown as Logger;
 
   new AnalyticsScheduler(pubRepo, logger).checkDueAnalytics();
 

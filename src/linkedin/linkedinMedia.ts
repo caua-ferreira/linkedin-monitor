@@ -39,7 +39,7 @@ async function putBinary(uploadUrl: string, buffer: Buffer, contentType: string,
     response = await fetchFn(uploadUrl, {
       method: 'PUT',
       headers: { 'Content-Type': contentType },
-      body: buffer,
+      body: buffer as BodyInit,
       signal: AbortSignal.timeout(60_000),
     });
   } catch (error) {
