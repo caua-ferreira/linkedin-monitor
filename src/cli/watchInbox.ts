@@ -4,10 +4,14 @@
  *   LOCAL  → data/inbox/          (salvar arquivo na máquina)
  *   DRIVE  → GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID (salvar pelo celular)
  *
- * Arquivos locais processados são movidos para data/processed/.
- * Arquivos do Drive processados são registrados em data/drive-processed.json (não deletados).
+ * Suporta dois formatos de exportação do LinkedIn:
+ *   - All Posts Analytics: uma linha por post (métricas acumuladas)
+ *   - Single Post Analytics: várias linhas por post (breakdown diário)
+ *     → deduplicado automaticamente, mantém a linha com mais impressões
  *
- * Pré-requisito: npm run linkedin:sync -- report.xlsx  (para vincular Post URLs ao Notion)
+ * Matching automático:
+ *   1. Tenta casar pelo campo "Post URL" no Notion
+ *   2. Fallback: casa pela "Data" do post no Notion e preenche Post URL automaticamente
  */
 import { readdirSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -55,18 +59,51 @@ async function processBuffer(
   let saved = 0;
   let skipped = 0;
 
-  for (const row of parsed.rows) {
-    if (!row.postUrl) { skipped++; continue; }
+  // Deduplica por postUrl: no formato Single Post, cada URL aparece várias vezes (dados diários).
+  // Mantém a linha com mais impressões — geralmente a mais recente (maior acumulado).
+  const dedupedRows = [...parsed.rows
+    .filter(r => r.postUrl)
+    .reduce((map, row) => {
+      const key = row.postUrl!;
+      const existing = map.get(key);
+      if (!existing || (row.impressions ?? 0) > (existing.impressions ?? 0)) map.set(key, row);
+      return map;
+    }, new Map())
+    .values(),
+  ];
+  // Preserva linhas sem URL para contagem de skipped
+  skipped += parsed.rows.length - parsed.rows.filter(r => r.postUrl).length;
+  // Linhas com URL mas descartadas na dedup
+  skipped += parsed.rows.filter(r => r.postUrl).length - dedupedRows.length;
 
+  for (const row of dedupedRows) {
+    // 1. Tenta casar pelo campo Post URL no Notion
     let notionPageId: string | null = null;
     try {
-      const pages = await notionClient.queryWithFilter({ property: 'Post URL', url: { equals: row.postUrl } });
+      const pages = await notionClient.queryWithFilter({ property: 'Post URL', url: { equals: row.postUrl! } });
       if (pages.length === 1) notionPageId = mapPage(pages[0]!).id;
-    } catch { /* ignora falha de query individual */ }
+    } catch { /* ignora falha de query */ }
+
+    // 2. Fallback: casa pela Data do Notion e preenche Post URL automaticamente
+    if (!notionPageId && row.publishedAt) {
+      try {
+        const pages = await notionClient.queryWithFilter({ property: 'Data', date: { equals: row.publishedAt } });
+        const candidates = pages.flatMap(p => { try { return [mapPage(p)]; } catch { return []; } });
+        const published = candidates.filter(p => p.status === 'Publicado');
+        const match = candidates.length === 1 ? candidates[0]! : published.length === 1 ? published[0]! : null;
+        if (match) {
+          notionPageId = match.id;
+          // Preenche Post URL no Notion para próximas execuções
+          if (!dryRun) {
+            try { await notionClient.updateProperties(match.id, { 'Post URL': { url: row.postUrl! } }); } catch { /* não bloqueia */ }
+          }
+          logger.info({ action: 'inbox_matched_by_date', date: row.publishedAt, notionPageId });
+        }
+      } catch { /* ignora */ }
+    }
 
     if (!notionPageId) {
-      logger.warn({ action: 'inbox_no_match', postUrl: row.postUrl.slice(0, 80),
-        hint: 'Execute: npm run linkedin:sync -- arquivo.xlsx' });
+      logger.warn({ action: 'inbox_no_match', postUrl: row.postUrl!.slice(0, 80) });
       skipped++;
       continue;
     }
