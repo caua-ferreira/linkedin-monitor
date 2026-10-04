@@ -61,7 +61,7 @@ export function registerLinkedInAuthRoutes(
     try {
       const tokens = await exchangeCodeForTokens(code, config);
       const memberUrn = await getMemberUrn(tokens.accessToken, config.fetch);
-      tokenRepo.save({
+      await tokenRepo.save({
         member_urn: memberUrn,
         access_token: tokens.accessToken,
         access_token_expires_at: tokens.accessTokenExpiresAt,

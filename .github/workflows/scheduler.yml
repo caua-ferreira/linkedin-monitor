@@ -1,0 +1,49 @@
+name: Scheduler
+
+on:
+  schedule:
+    # Roda a cada 5 minutos
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  scheduler:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Restaura o banco SQLite da run anterior para preservar:
+      # publications (estado da fila), linkedin_tokens (token OAuth)
+      - name: Restaura banco SQLite
+        uses: actions/cache@v4
+        with:
+          path: data/linkedin-monitor.sqlite
+          key: sqlite-scheduler-${{ github.run_id }}
+          restore-keys: sqlite-scheduler-
+
+      - name: Cria pasta data se não existir
+        run: mkdir -p data
+
+      - name: Roda scheduler --once
+        env:
+          DRY_RUN: 'false'
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          NOTION_API_VERSION: ${{ vars.NOTION_API_VERSION }}
+          LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+          LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+          LINKEDIN_REDIRECT_URI: ${{ vars.LINKEDIN_REDIRECT_URI }}
+          LINKEDIN_API_VERSION: ${{ vars.LINKEDIN_API_VERSION }}
+          DATABASE_PATH: './data/linkedin-monitor.sqlite'
+          DATA_DIR: './data'
+          LOG_LEVEL: info
+        run: npm run scheduler -- --once

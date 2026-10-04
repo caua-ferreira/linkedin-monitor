@@ -45,6 +45,7 @@ async function tick(
 }
 
 async function main() {
+  const once = process.argv.includes('--once');
   const env = loadEnv();
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
   const dbUrl = env.TURSO_DATABASE_URL || env.DATABASE_PATH;
@@ -70,10 +71,15 @@ async function main() {
   const analyticsRepo = new AnalyticsRepository(db);
   const analyticsScheduler = new AnalyticsScheduler(publicationRepo, logger, analyticsRepo);
 
-  logger.info({ action: 'scheduler_start', intervalMs: INTERVAL_MS });
+  logger.info({ action: 'scheduler_start', intervalMs: once ? 0 : INTERVAL_MS, once });
 
-  // Executa imediatamente na primeira vez, depois a cada INTERVAL_MS.
   await tick(queueService, postScheduler, analyticsScheduler, logger);
+
+  if (once) {
+    db.close();
+    return;
+  }
+
   setInterval(() => {
     tick(queueService, postScheduler, analyticsScheduler, logger).catch(error => {
       logger.error({ action: 'tick_uncaught', code: errorCode(error) });
