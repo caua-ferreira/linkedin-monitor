@@ -1,14 +1,16 @@
 /**
- * Monitora data/inbox/ e processa automaticamente cada XLSX exportado do LinkedIn.
+ * Monitora dois inboxes em paralelo e processa automaticamente cada XLSX exportado do LinkedIn:
  *
- * Fluxo de uso:
- *   1. npm run linkedin:sync -- report.xlsx   (uma vez, para vincular Post URLs)
- *   2. npm run watch:inbox                    (deixar rodando em background)
- *   3. Exporte o XLSX do LinkedIn e salve em data/inbox/
- *      → O watcher detecta, importa os analytics e move o arquivo para data/processed/
+ *   LOCAL  → data/inbox/          (salvar arquivo na máquina)
+ *   DRIVE  → GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID (salvar pelo celular)
+ *
+ * Arquivos locais processados são movidos para data/processed/.
+ * Arquivos do Drive processados são registrados em data/drive-processed.json (não deletados).
+ *
+ * Pré-requisito: npm run linkedin:sync -- report.xlsx  (para vincular Post URLs ao Notion)
  */
-import { readdirSync, readFileSync, mkdirSync, renameSync, writeFileSync, statSync } from 'node:fs';
-import { join, basename } from 'node:path';
+import { readdirSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { loadEnv } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
 import { openDatabase } from '../storage/database.js';
@@ -18,34 +20,34 @@ import { mapPage } from '../notion/notionRepository.js';
 import { parseLinkedInXlsx } from '../analytics/providers/linkedinXlsxProvider.js';
 import { suggestCheckpoint } from '../analytics/analyticsModels.js';
 import { saveSnapshot } from '../analytics/analyticsService.js';
+import { GoogleDriveClient } from '../integrations/googleDriveClient.js';
 
-const POLL_MS = 60_000; // 1 minuto
+const POLL_MS = 60_000;
 
 function ensureDir(dir: string) { mkdirSync(dir, { recursive: true }); }
 
-async function processFile(
-  filePath: string,
-  inboxDir: string,
-  processedDir: string,
-  failedDir: string,
+function loadProcessedDriveIds(path: string): Set<string> {
+  try { return new Set(JSON.parse(readFileSync(path, 'utf8')) as string[]); } catch { return new Set(); }
+}
+
+function saveProcessedDriveIds(path: string, ids: Set<string>) {
+  writeFileSync(path, JSON.stringify([...ids], null, 2), 'utf8');
+}
+
+async function processBuffer(
+  buffer: Buffer,
+  label: string,
   analyticsRepo: AnalyticsRepository,
   notionClient: NotionClient,
   dryRun: boolean,
   logger: ReturnType<typeof createLogger>,
-): Promise<void> {
-  const name = basename(filePath);
-  logger.info({ action: 'inbox_processing', file: name });
-
+): Promise<{ saved: number; skipped: number }> {
   let parsed;
   try {
-    parsed = parseLinkedInXlsx(readFileSync(filePath));
+    parsed = parseLinkedInXlsx(buffer);
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logger.error({ action: 'inbox_parse_failed', file: name, error: msg });
-    ensureDir(failedDir);
-    renameSync(filePath, join(failedDir, name));
-    writeFileSync(join(failedDir, `${name}.error.txt`), `${new Date().toISOString()} ${msg}\n`);
-    return;
+    logger.error({ action: 'inbox_parse_failed', file: label, error: e instanceof Error ? e.message : String(e) });
+    return { saved: 0, skipped: 0 };
   }
 
   const capturedAt = new Date().toISOString();
@@ -56,7 +58,6 @@ async function processFile(
   for (const row of parsed.rows) {
     if (!row.postUrl) { skipped++; continue; }
 
-    // Resolve notion_page_id via Post URL no Notion
     let notionPageId: string | null = null;
     try {
       const pages = await notionClient.queryWithFilter({ property: 'Post URL', url: { equals: row.postUrl } });
@@ -64,7 +65,7 @@ async function processFile(
     } catch { /* ignora falha de query individual */ }
 
     if (!notionPageId) {
-      logger.warn({ action: 'inbox_no_match', postUrl: row.postUrl.slice(0, 60),
+      logger.warn({ action: 'inbox_no_match', postUrl: row.postUrl.slice(0, 80),
         hint: 'Execute: npm run linkedin:sync -- arquivo.xlsx' });
       skipped++;
       continue;
@@ -76,17 +77,17 @@ async function processFile(
       const pub = new Date(publishedAt);
       if (!Number.isNaN(pub.getTime())) postAgeMinutes = Math.round((capturedDate.getTime() - pub.getTime()) / 60_000);
     }
-    const checkpoint = postAgeMinutes !== null ? suggestCheckpoint(postAgeMinutes) : null;
 
     try {
       await saveSnapshot(
         {
-          notionPageId, linkedinPostUrn: null, checkpoint, capturedAt,
-          postAgeMinutes, impressions: row.impressions, reach: row.reach,
-          reactions: row.reactions, comments: row.comments, shares: row.shares,
-          saves: row.saves, sends: row.sends, profileViews: row.profileViews,
-          followersGained: row.followersGained, linkClicks: row.linkClicks,
-          premiumCtaClicks: row.premiumCtaClicks,
+          notionPageId, linkedinPostUrn: null,
+          checkpoint: postAgeMinutes !== null ? suggestCheckpoint(postAgeMinutes) : null,
+          capturedAt, postAgeMinutes,
+          impressions: row.impressions, reach: row.reach, reactions: row.reactions,
+          comments: row.comments, shares: row.shares, saves: row.saves, sends: row.sends,
+          profileViews: row.profileViews, followersGained: row.followersGained,
+          linkClicks: row.linkClicks, premiumCtaClicks: row.premiumCtaClicks,
           rawPayload: JSON.stringify(row.rawRow), source: 'linkedin_xlsx',
         },
         analyticsRepo,
@@ -101,37 +102,84 @@ async function processFile(
     }
   }
 
-  logger.info({ action: 'inbox_done', file: name, saved, skipped, dryRun });
-
-  if (dryRun) {
-    // Em dry-run não move — permite re-processar com DRY_RUN=false
-    process.stdout.write(`[dry-run] ${name}: ${saved} snapshot(s) calculado(s), ${skipped} ignorado(s).\n`);
-    return;
-  }
-
-  ensureDir(processedDir);
-  renameSync(filePath, join(processedDir, `${Date.now()}_${name}`));
-  process.stdout.write(`✓ ${name}: ${saved} snapshot(s) salvo(s). Arquivo movido para processed/.\n`);
+  return { saved, skipped };
 }
 
-async function pollOnce(
+async function pollLocal(
   inboxDir: string, processedDir: string, failedDir: string,
   analyticsRepo: AnalyticsRepository, notionClient: NotionClient,
   dryRun: boolean, logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
   let files: string[];
-  try {
-    files = readdirSync(inboxDir).filter(f => f.toLowerCase().endsWith('.xlsx'));
-  } catch { return; } // inbox ainda não existe
+  try { files = readdirSync(inboxDir).filter(f => f.toLowerCase().endsWith('.xlsx')); }
+  catch { return; }
 
   for (const file of files) {
     const filePath = join(inboxDir, file);
-    // Ignora arquivos ainda sendo escritos (modificado há menos de 3s)
-    try {
-      if (Date.now() - statSync(filePath).mtimeMs < 3_000) continue;
-    } catch { continue; }
+    try { if (Date.now() - statSync(filePath).mtimeMs < 3_000) continue; } catch { continue; }
 
-    await processFile(filePath, inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger);
+    const { saved, skipped } = await processBuffer(
+      readFileSync(filePath), file, analyticsRepo, notionClient, dryRun, logger,
+    );
+    logger.info({ action: 'inbox_local_done', file, saved, skipped, dryRun });
+
+    if (!dryRun) {
+      ensureDir(processedDir);
+      try { renameSync(filePath, join(processedDir, `${Date.now()}_${file}`)); } catch { /* já foi movido */ }
+      process.stdout.write(`✓ [local] ${file}: ${saved} snapshot(s) salvo(s).\n`);
+    } else {
+      process.stdout.write(`[dry-run] [local] ${file}: ${saved} calculado(s), ${skipped} ignorado(s).\n`);
+    }
+
+    if (skipped > 0 && saved === 0) {
+      ensureDir(failedDir);
+      try { renameSync(filePath, join(failedDir, file)); } catch { /* ok */ }
+    }
+  }
+}
+
+async function pollDrive(
+  driveClient: GoogleDriveClient, folderId: string,
+  processedIdsPath: string, processedIds: Set<string>,
+  analyticsRepo: AnalyticsRepository, notionClient: NotionClient,
+  dryRun: boolean, logger: ReturnType<typeof createLogger>,
+): Promise<void> {
+  let files;
+  try { files = await driveClient.listFilesInFolder(folderId); }
+  catch (e) {
+    logger.warn({ action: 'drive_list_failed', error: e instanceof Error ? e.message : String(e) });
+    return;
+  }
+
+  const xlsxFiles = files.filter(f =>
+    f.name.toLowerCase().endsWith('.xlsx') ||
+    f.mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  );
+
+  for (const file of xlsxFiles) {
+    if (processedIds.has(file.id)) continue;
+
+    let buffer: Buffer;
+    try {
+      const dl = await driveClient.downloadFile(file.id);
+      buffer = dl.buffer;
+    } catch (e) {
+      logger.error({ action: 'drive_download_failed', file: file.name, error: e instanceof Error ? e.message : String(e) });
+      continue;
+    }
+
+    const { saved, skipped } = await processBuffer(
+      buffer, `Drive:${file.name}`, analyticsRepo, notionClient, dryRun, logger,
+    );
+    logger.info({ action: 'inbox_drive_done', file: file.name, driveId: file.id, saved, skipped, dryRun });
+
+    if (!dryRun) {
+      processedIds.add(file.id);
+      saveProcessedDriveIds(processedIdsPath, processedIds);
+      process.stdout.write(`✓ [drive] ${file.name}: ${saved} snapshot(s) salvo(s).\n`);
+    } else {
+      process.stdout.write(`[dry-run] [drive] ${file.name}: ${saved} calculado(s), ${skipped} ignorado(s).\n`);
+    }
   }
 }
 
@@ -143,6 +191,7 @@ async function main() {
   const inboxDir = join(env.DATA_DIR, 'inbox');
   const processedDir = join(env.DATA_DIR, 'processed');
   const failedDir = join(env.DATA_DIR, 'failed');
+  const processedIdsPath = join(env.DATA_DIR, 'drive-processed.json');
   ensureDir(inboxDir);
 
   const db = openDatabase(env.DATABASE_PATH);
@@ -152,18 +201,36 @@ async function main() {
     version: env.NOTION_API_VERSION, dryRun, logger,
   });
 
-  if (dryRun) {
-    process.stdout.write('AVISO: DRY_RUN=true — snapshots calculados mas NÃO salvos. Defina DRY_RUN=false para ativar.\n\n');
+  const hasDrive = Boolean(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH && env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID);
+  let driveClient: GoogleDriveClient | null = null;
+  let processedIds = new Set<string>();
+
+  if (hasDrive) {
+    if (!existsSync(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH)) {
+      process.stdout.write(`AVISO: GOOGLE_SERVICE_ACCOUNT_KEY_PATH não encontrado — Drive desativado.\n`);
+    } else {
+      driveClient = new GoogleDriveClient(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH);
+      processedIds = loadProcessedDriveIds(processedIdsPath);
+      process.stdout.write(`Drive inbox: pasta ${env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID}\n`);
+    }
   }
 
-  process.stdout.write(`Monitorando ${inboxDir} (intervalo: ${POLL_MS / 1000}s)\n`);
-  process.stdout.write('Exporte o XLSX do LinkedIn e salve nessa pasta. Ctrl+C para encerrar.\n\n');
+  if (dryRun) process.stdout.write('AVISO: DRY_RUN=true — snapshots calculados mas NÃO salvos.\n\n');
 
-  await pollOnce(inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger);
-  setInterval(() => {
-    pollOnce(inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger)
-      .catch(e => logger.error({ action: 'inbox_poll_failed', error: e instanceof Error ? e.message : String(e) }));
-  }, POLL_MS);
+  process.stdout.write(`Monitorando ${inboxDir} (intervalo: ${POLL_MS / 1000}s)\n`);
+  if (driveClient) process.stdout.write('Drive inbox ativo — salve o XLSX no Drive pelo celular ou computador.\n');
+  process.stdout.write('Ctrl+C para encerrar.\n\n');
+
+  const tick = async () => {
+    await pollLocal(inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger);
+    if (driveClient) {
+      await pollDrive(driveClient, env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID,
+        processedIdsPath, processedIds, analyticsRepo, notionClient, dryRun, logger);
+    }
+  };
+
+  await tick();
+  setInterval(() => { tick().catch(e => logger.error({ action: 'watch_tick_failed', error: e instanceof Error ? e.message : String(e) })); }, POLL_MS);
 }
 
 main().catch(e => {
