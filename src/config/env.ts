@@ -18,6 +18,8 @@ const schema = z.object({
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z.string().default(''),
   GOOGLE_DRIVE_FOLDER_ID: z.string().default(''),
+  BRAINFROST_BASE_URL: z.string().default('https://www.brainfrost.com.br/'),
+  BRAINFROST_UTM_CAMPAIGN: z.string().default('brainfrost_beta'),
 });
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env, requireToken = true) {

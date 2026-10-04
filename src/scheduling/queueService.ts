@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Logger } from 'pino';
 import { SafeError } from '../utils/errors.js';
 import { validatePostForPublishing } from '../services/postValidation.js';
+import { resolveUtm } from '../utils/utm.js';
 import type { NotionClient } from '../notion/notionClient.js';
 import type { PublicationRepository } from '../storage/publicationRepository.js';
 import type { NotionRepository } from '../notion/notionRepository.js';
@@ -18,6 +19,8 @@ export class QueueService {
     private readonly publicationRepo: PublicationRepository,
     private readonly notion: NotionClient,
     private readonly logger: Logger,
+    private readonly brainfrostBaseUrl = 'https://www.brainfrost.com.br/',
+    private readonly brainfrostCampaign = 'brainfrost_beta',
   ) {}
 
   async enqueueEligiblePosts(): Promise<QueueResult> {
@@ -41,8 +44,21 @@ export class QueueService {
       // Mantém 'select' como padrão — ambas as bases conhecidas usam select.
     }
 
-    for (const post of posts) {
+    for (const rawPost of posts) {
       try {
+        let post = rawPost;
+        // Phase G: gera UTM para posts BrainFrost sem UTM antes de validar
+        const utmGenerated = resolveUtm(post, this.brainfrostBaseUrl, this.brainfrostCampaign);
+        if (utmGenerated) {
+          try {
+            await this.notion.updateProperties(post.id, { 'UTM URL': { url: utmGenerated } });
+            post = { ...post, utmUrl: utmGenerated };
+            this.logger.info({ action: 'utm_generated', postId: post.id, utmUrl: utmGenerated });
+          } catch {
+            this.logger.warn({ action: 'utm_generation_failed', postId: post.id });
+          }
+        }
+
         const validation = validatePostForPublishing(post);
         if (!validation.valid) {
           this.logger.info({ action: 'queue_skipped', postId: post.id, reasons: validation.errors });
@@ -84,7 +100,7 @@ export class QueueService {
         this.logger.info({ action: 'queued', postId: post.id, scheduledAt });
         result.queued++;
       } catch (error) {
-        this.logger.error({ action: 'queue_post_error', postId: post.id, code: error instanceof SafeError ? error.code : 'UNKNOWN' });
+        this.logger.error({ action: 'queue_post_error', postId: rawPost.id, code: error instanceof SafeError ? error.code : 'UNKNOWN' });
         result.errors++;
       }
     }

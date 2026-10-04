@@ -19,6 +19,7 @@
     "auth:start": "tsx src/cli/startAuth.ts",
     "auth:status": "tsx src/cli/authStatus.ts",
     "drive:link": "tsx src/cli/linkDriveAssets.ts",
+    "reconcile": "tsx src/cli/reconcile.ts",
     "build": "tsc"
   },
   "dependencies": {

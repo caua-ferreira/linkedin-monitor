@@ -36,6 +36,7 @@ export interface EditorialPost {
   publishedAt: string;
   automationError: string;
   archived: boolean;
+  brainfrost: boolean;
   text: string;
   contentErrors: string[];
 }

@@ -42,7 +42,9 @@ export function mapPage(page: NotionPage): EditorialPost {
     dateEnd: date.data?.end ?? null, format: value(p.Formato), art: value(p.Arte), ready,
     mediaUrl: value(p['Mídia URL']), postUrl: value(p['Post URL']), utmUrl: value(p['UTM URL']),
     schedulerId: value(p['Scheduler ID']), publishedAt: value(p['Publicado em']), automationError: value(p['Erro automação']),
-    archived: Boolean(page.archived || page.is_archived || page.in_trash), text: '', contentErrors: [],
+    archived: Boolean(page.archived || page.is_archived || page.in_trash),
+    brainfrost: p['BrainFrost?']?.type === 'checkbox' ? Boolean(p['BrainFrost?']?.checkbox) : false,
+    text: '', contentErrors: [],
   };
 }
 

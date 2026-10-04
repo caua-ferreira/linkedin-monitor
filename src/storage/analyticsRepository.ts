@@ -4,6 +4,12 @@ import type { AnalyticsSnapshot } from '../analytics/analyticsModels.js';
 export class AnalyticsRepository {
   constructor(private readonly db: DatabaseSync) {}
 
+  checkpointsFor(notionPageId: string): string[] {
+    return (this.db.prepare(
+      'SELECT DISTINCT checkpoint FROM analytics_snapshots WHERE notion_page_id = $id AND checkpoint IS NOT NULL',
+    ).all({ $id: notionPageId }) as { checkpoint: string }[]).map(r => r.checkpoint);
+  }
+
   insert(snapshot: AnalyticsSnapshot): void {
     this.db.prepare(`
       INSERT INTO analytics_snapshots

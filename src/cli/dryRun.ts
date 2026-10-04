@@ -24,7 +24,7 @@ async function main() {
       ? [{ ...mapPage(demoPage), text: extracted.text, contentErrors: extracted.errors }]
       : await new NotionRepository(client).getReadyPosts();
     const plan = buildDryRunPlan(posts, new Date(), logger);
-    const output = { mode: demo ? 'demo_fixture' : 'notion_live_read', phase: 'A', publishingImplemented: false, posts: plan };
+    const output = { mode: demo ? 'demo_fixture' : 'notion_live_read', phase: 'D', publishingImplemented: true, posts: plan };
     await mkdir(directory, { recursive: true });
     const file = join(directory, `dry-run-${Date.now()}-${randomUUID()}.json`);
     await writeFile(file, JSON.stringify(output, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
