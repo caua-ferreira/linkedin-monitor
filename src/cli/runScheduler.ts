@@ -51,6 +51,25 @@ async function main() {
   const dbUrl = env.TURSO_DATABASE_URL || env.DATABASE_PATH;
   const db = await openDatabase(dbUrl, env.TURSO_AUTH_TOKEN || undefined);
   const tokenRepo = new TokenRepository(db);
+
+  // Seed do token a partir de variáveis de ambiente (usado no GitHub Actions).
+  // Se LINKEDIN_ACCESS_TOKEN estiver definido e o banco não tiver token válido, semeia.
+  if (process.env.LINKEDIN_ACCESS_TOKEN && process.env.LINKEDIN_MEMBER_URN && process.env.LINKEDIN_ACCESS_TOKEN_EXPIRES) {
+    const existing = await tokenRepo.get();
+    const isValid = existing && new Date(existing.access_token_expires_at).getTime() > Date.now() + 5 * 60_000;
+    if (!isValid) {
+      await tokenRepo.save({
+        member_urn: process.env.LINKEDIN_MEMBER_URN,
+        access_token: process.env.LINKEDIN_ACCESS_TOKEN,
+        access_token_expires_at: process.env.LINKEDIN_ACCESS_TOKEN_EXPIRES,
+        refresh_token: null,
+        refresh_token_expires_at: null,
+        authorized_scopes: process.env.LINKEDIN_AUTHORIZED_SCOPES ?? 'email openid profile w_member_social',
+      });
+      logger.info({ action: 'token_seeded_from_env', member_urn: process.env.LINKEDIN_MEMBER_URN });
+    }
+  }
+
   const publicationRepo = new PublicationRepository(db);
   const notion = new NotionClient({
     token: env.NOTION_TOKEN, dataSourceId: env.NOTION_DATA_SOURCE_ID,
