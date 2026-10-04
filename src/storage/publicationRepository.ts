@@ -113,7 +113,7 @@ export class PublicationRepository {
 
   async isActiveByIdempotencyKey(key: string): Promise<boolean> {
     const result = await this.db.execute({
-      sql: "SELECT 1 FROM publications WHERE idempotency_key = ? AND operational_state NOT IN ('failed')",
+      sql: 'SELECT 1 FROM publications WHERE idempotency_key = ?',
       args: [key],
     });
     return result.rows.length > 0;
