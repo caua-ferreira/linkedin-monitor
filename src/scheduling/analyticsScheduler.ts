@@ -1,5 +1,6 @@
 import type { Logger } from 'pino';
 import type { PublicationRepository } from '../storage/publicationRepository.js';
+import type { AnalyticsRepository } from '../storage/analyticsRepository.js';
 
 // Janelas alvo de coleta em minutos.
 const WINDOWS = [
@@ -12,6 +13,7 @@ export class AnalyticsScheduler {
   constructor(
     private readonly publicationRepo: PublicationRepository,
     private readonly logger: Logger,
+    private readonly analyticsRepo?: AnalyticsRepository,
   ) {}
 
   checkDueAnalytics(): void {
@@ -30,7 +32,23 @@ export class AnalyticsScheduler {
             postUrn: pub.linkedin_post_urn,
             notionPageId: pub.notion_page_id,
             ageMinutes: Math.round(ageMinutes),
+            hint: 'Exporte o XLSX do LinkedIn Analytics e salve em data/inbox/',
           });
+        }
+
+        // Avisa quando a janela passou mas nenhum snapshot foi coletado
+        if (this.analyticsRepo && ageMinutes > window.maxMinutes) {
+          const collected = this.analyticsRepo.checkpointsFor(pub.notion_page_id);
+          if (!collected.includes(window.checkpoint)) {
+            this.logger.warn({
+              action: 'analytics_overdue',
+              checkpoint: window.checkpoint,
+              postUrn: pub.linkedin_post_urn,
+              notionPageId: pub.notion_page_id,
+              ageMinutes: Math.round(ageMinutes),
+              hint: 'Exporte o XLSX do LinkedIn Analytics e salve em data/inbox/',
+            });
+          }
         }
       }
     }

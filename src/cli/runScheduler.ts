@@ -8,6 +8,7 @@ import { NotionRepository } from '../notion/notionRepository.js';
 import { QueueService } from '../scheduling/queueService.js';
 import { PostScheduler } from '../scheduling/postScheduler.js';
 import { AnalyticsScheduler } from '../scheduling/analyticsScheduler.js';
+import { AnalyticsRepository } from '../storage/analyticsRepository.js';
 import { errorCode } from '../utils/errors.js';
 
 const INTERVAL_MS = 5 * 60 * 1_000; // 5 minutos
@@ -65,7 +66,8 @@ async function main() {
     notionRepo, publicationRepo, tokenRepo, notion, oauthConfig,
     env.LINKEDIN_API_VERSION, logger,
   );
-  const analyticsScheduler = new AnalyticsScheduler(publicationRepo, logger);
+  const analyticsRepo = new AnalyticsRepository(db);
+  const analyticsScheduler = new AnalyticsScheduler(publicationRepo, logger, analyticsRepo);
 
   logger.info({ action: 'scheduler_start', intervalMs: INTERVAL_MS });
 
