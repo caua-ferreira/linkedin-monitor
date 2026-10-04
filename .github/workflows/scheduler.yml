@@ -33,6 +33,15 @@ jobs:
       - name: Cria pasta data se não existir
         run: mkdir -p data
 
+      - name: Semeia token LinkedIn no banco
+        env:
+          DATABASE_PATH: './data/linkedin-monitor.sqlite'
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          LINKEDIN_MEMBER_URN: ${{ secrets.LINKEDIN_MEMBER_URN }}
+          LINKEDIN_ACCESS_TOKEN_EXPIRES: ${{ secrets.LINKEDIN_ACCESS_TOKEN_EXPIRES }}
+          LINKEDIN_AUTHORIZED_SCOPES: ${{ secrets.LINKEDIN_AUTHORIZED_SCOPES }}
+        run: node scripts/seed-token.mjs
+
       - name: Roda scheduler --once
         env:
           DRY_RUN: 'false'
