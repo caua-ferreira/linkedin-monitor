@@ -6,6 +6,7 @@ import type { TokenRepository } from '../storage/tokenRepository.js';
 import type { PublicationRepository } from '../storage/publicationRepository.js';
 import type { NotionRepository } from '../notion/notionRepository.js';
 import type { OAuthConfig } from '../linkedin/linkedinAuth.js';
+import type { GoogleDriveClient } from '../integrations/googleDriveClient.js';
 
 export interface SchedulerResult {
   published: number;
@@ -23,9 +24,11 @@ export class PostScheduler {
     private readonly apiVersion: string,
     private readonly logger: Logger,
     private readonly fetch?: typeof globalThis.fetch,
+    private readonly dryRun = true,
+    private readonly driveClient?: GoogleDriveClient,
   ) {}
 
-  async publishDuePosts(): Promise<SchedulerResult> {
+  async publishDuePosts(pageId?: string): Promise<SchedulerResult> {
     const result: SchedulerResult = { published: 0, skipped: 0, errors: 0 };
     const now = new Date().toISOString();
     const due = await this.publicationRepo.findDueQueued(now);
@@ -34,10 +37,11 @@ export class PostScheduler {
     this.logger.info({ action: 'scheduler_tick', due: due.length });
 
     for (const pub of due) {
+      if (pageId && pub.notion_page_id !== pageId) continue;
       try {
         const post = await this.notionRepo.getPostById(pub.notion_page_id);
-        await publishPost(post, {
-          dryRun: false,
+        const outcome = await publishPost(post, {
+          dryRun: this.dryRun,
           tokenRepo: this.tokenRepo,
           publicationRepo: this.publicationRepo,
           notion: this.notion,
@@ -46,7 +50,13 @@ export class PostScheduler {
           logger: this.logger,
           existingPubId: pub.id,
           fetch: this.fetch,
+          driveClient: this.driveClient,
         });
+        if (outcome.dryRun) {
+          this.logger.info({ action: 'scheduler_dry_run', postId: post.id, preview: outcome });
+          result.skipped++;
+          continue;
+        }
         this.logger.info({ action: 'scheduler_published', postId: post.id, pubId: pub.id });
         result.published++;
       } catch (error) {

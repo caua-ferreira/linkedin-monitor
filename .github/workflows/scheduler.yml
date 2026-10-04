@@ -31,7 +31,11 @@ jobs:
           restore-keys: sqlite-scheduler-
 
       - name: Cria pasta data se não existir
-        run: mkdir -p data
+        run: mkdir -p data secrets
+
+      - name: Escreve chave Google Service Account
+        if: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY != '' }}
+        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}' > secrets/google-service-account.json
 
       - name: Roda scheduler --once
         env:
@@ -50,4 +54,5 @@ jobs:
           DATABASE_PATH: './data/linkedin-monitor.sqlite'
           DATA_DIR: './data'
           LOG_LEVEL: info
+          GOOGLE_SERVICE_ACCOUNT_KEY_PATH: './secrets/google-service-account.json'
         run: npm run scheduler -- --once

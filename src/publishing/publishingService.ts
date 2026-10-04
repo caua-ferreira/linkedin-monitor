@@ -10,6 +10,7 @@ import { LinkedInClient } from '../linkedin/linkedinClient.js';
 import { createTextPost, createMediaPost } from '../linkedin/linkedinPosts.js';
 import { isTokenExpired, refreshAccessToken, getMemberUrn, type OAuthConfig } from '../linkedin/linkedinAuth.js';
 import { uploadMediaAsset, notionFormatToMediaType } from '../linkedin/linkedinMedia.js';
+import type { GoogleDriveClient } from '../integrations/googleDriveClient.js';
 
 export interface PublishResult {
   postUrn: string;
@@ -41,6 +42,7 @@ export async function publishPost(
     /** Passa ID de um registro 'queued' existente para atualizar no lugar de inserir. */
     existingPubId?: string;
     fetch?: typeof fetch;
+    driveClient?: GoogleDriveClient;
   },
 ): Promise<PublishOutcome> {
   const { dryRun, tokenRepo, publicationRepo, notion, oauthConfig, apiVersion, logger } = opts;
@@ -101,7 +103,7 @@ export async function publishPost(
   // 7. Cria ou atualiza o registro de publicação para estado 'publishing'
   const pubId = opts.existingPubId ?? randomUUID();
   if (opts.existingPubId) {
-    await publicationRepo.updateState(pubId, 'publishing');
+    if (!await publicationRepo.claimQueued(pubId, post.id)) throw new SafeError('PUBLISH_ALREADY_CLAIMED');
   } else {
     await publicationRepo.insert({
       id: pubId,
@@ -121,7 +123,7 @@ export async function publishPost(
   let postResult;
   try {
     if (mediaType && post.mediaUrl) {
-      const assetUrn = await uploadMediaAsset(post.mediaUrl, mediaType, memberUrn, client, opts.fetch ?? fetch);
+      const assetUrn = await uploadMediaAsset(post.mediaUrl, mediaType, memberUrn, client, opts.fetch ?? fetch, opts.driveClient);
       logger.info({ action: 'media_uploaded', postId: post.id, mediaType, assetUrn });
       postResult = await createMediaPost({ memberUrn, text: post.text, assetUrn }, client);
     } else {
@@ -130,7 +132,8 @@ export async function publishPost(
   } catch (error) {
     // Resultado desconhecido — não é seguro tentar novamente
     const isAmbiguous = error instanceof SafeError &&
-      ['LINKEDIN_TIMEOUT', 'LINKEDIN_NETWORK_ERROR', 'LINKEDIN_POST_NO_URN'].includes(error.code);
+      (['LINKEDIN_TIMEOUT', 'LINKEDIN_NETWORK_ERROR', 'LINKEDIN_POST_NO_URN', 'LINKEDIN_POST_INVALID_RESPONSE'].includes(error.code)
+        || (error.status !== undefined && error.status >= 500));
     const state = isAmbiguous ? 'reconciliation_required' : 'failed';
     const code = error instanceof SafeError ? error.code : 'UNKNOWN';
     await publicationRepo.updateState(pubId, state, { error_code: code });

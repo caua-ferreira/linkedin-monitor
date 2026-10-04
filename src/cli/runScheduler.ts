@@ -10,6 +10,7 @@ import { PostScheduler } from '../scheduling/postScheduler.js';
 import { AnalyticsScheduler } from '../scheduling/analyticsScheduler.js';
 import { AnalyticsRepository } from '../storage/analyticsRepository.js';
 import { errorCode } from '../utils/errors.js';
+import { GoogleDriveClient } from '../integrations/googleDriveClient.js';
 
 const INTERVAL_MS = 5 * 60 * 1_000; // 5 minutos
 
@@ -47,6 +48,11 @@ async function tick(
 async function main() {
   const once = process.argv.includes('--once');
   const env = loadEnv();
+  if (env.DRY_RUN === 'true') {
+    process.argv = process.argv.filter(a => a !== '--once');
+    await import('./dryRun.js');
+    return;
+  }
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
   const dbUrl = env.TURSO_DATABASE_URL || env.DATABASE_PATH;
   const db = await openDatabase(dbUrl, env.TURSO_AUTH_TOKEN || undefined);
@@ -82,10 +88,19 @@ async function main() {
     redirectUri: env.LINKEDIN_REDIRECT_URI,
   };
 
+  let driveClient: GoogleDriveClient | undefined;
+  if (env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH) {
+    try {
+      driveClient = new GoogleDriveClient(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH);
+    } catch {
+      logger.warn({ action: 'drive_client_init_failed', keyPath: env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH });
+    }
+  }
+
   const queueService = new QueueService(notionRepo, publicationRepo, notion, logger);
   const postScheduler = new PostScheduler(
     notionRepo, publicationRepo, tokenRepo, notion, oauthConfig,
-    env.LINKEDIN_API_VERSION, logger,
+    env.LINKEDIN_API_VERSION, logger, undefined, false, driveClient,
   );
   const analyticsRepo = new AnalyticsRepository(db);
   const analyticsScheduler = new AnalyticsScheduler(publicationRepo, logger, analyticsRepo);
