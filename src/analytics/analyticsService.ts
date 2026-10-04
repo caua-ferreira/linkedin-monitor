@@ -99,6 +99,9 @@ async function updateNotionSummary(
   if (snapshot.followers_gained !== null) cumulative['Novos seguidores'] = num(snapshot.followers_gained);
   if (snapshot.link_clicks !== null) cumulative['Cliques'] = num(snapshot.link_clicks);
 
+  // Última coleta — sempre atualiza com a data/hora ISO do snapshot
+  cumulative['Última coleta'] = { date: { start: snapshot.captured_at } };
+
   // Campos por checkpoint
   const perCheckpoint: Record<string, unknown> = {};
   if (cp === '1h') {
@@ -116,7 +119,13 @@ async function updateNotionSummary(
   }
 
   const properties = { ...cumulative, ...perCheckpoint };
-  if (Object.keys(properties).length === 0) return;
+
+  // Log para diagnosticar quais campos chegam com valor
+  const filled = Object.entries(properties).reduce<Record<string, unknown>>((acc, [k, v]) => {
+    if (v !== null && v !== undefined) acc[k] = v;
+    return acc;
+  }, {});
+  logger.info({ action: 'analytics_notion_payload', notion_page_id: snapshot.notion_page_id, checkpoint: cp, fields: filled });
 
   try {
     await notion.updateProperties(snapshot.notion_page_id, properties);
