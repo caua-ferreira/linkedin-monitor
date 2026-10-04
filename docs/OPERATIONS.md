@@ -1,5 +1,16 @@
 # Operação — Fase A
 
+## Correções verificadas em 2026-10-04
+
+O scheduler local respeita `DRY_RUN=true` antes de abrir o banco operacional ou
+enfileirar publicações; nesse modo executa a prévia somente leitura. A classe
+PostScheduler também usa simulação por padrão. A publicação real exige opção explícita.
+O claim de um item enfileirado é atômico no mesmo banco. Processos usando bancos
+diferentes não compartilham esse lock: não execute workers independentes para o mesmo post.
+Criação de posts não repete automaticamente chamadas em caso de 5xx; resultado
+incerto exige reconciliação. Estas mudanças locais precisam ser implantadas para
+afetarem GitHub Actions ou Vercel.
+
 ## Validar antes de continuar
 
 1. Execute `npm install`, `npm run test`, `npm run lint`, `npm run build`.

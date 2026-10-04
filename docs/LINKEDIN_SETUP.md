@@ -1,5 +1,14 @@
 # LinkedIn — preparação para Fase B
 
+## Verificação em 2026-10-04
+
+A configuração local foi atualizada de `202501` para `202609`, versão mais recente
+indicada na [documentação oficial de versionamento](https://learn.microsoft.com/en-us/linkedin/marketing/versioning).
+Continua configurável em `LINKEDIN_API_VERSION`. A criação textual usa
+`POST /rest/posts`, `w_member_social`, os dois headers de versão e captura
+`x-restli-id`, conforme a [Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-09).
+Não repetir a criação após resposta 5xx, pois ela pode ter sido efetivada.
+
 A Fase A não chama o LinkedIn e não requer Client ID ou Client Secret.
 Não existem rotas OAuth nem tokens LinkedIn persistidos nesta entrega.
 

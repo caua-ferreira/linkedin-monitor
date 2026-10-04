@@ -1,9 +1,18 @@
 # Calendário Editorial Notion ↔ LinkedIn
 
-Automação local em TypeScript. **Entrega atual: Fase A — Notion e DRY_RUN.**
-Lê o Notion, valida candidatos e gera uma prévia exata do texto e dos metadados.
-Ainda não publica, não faz upload, não agenda em segundo plano e não coleta analytics.
-`DRY_RUN=false` é recusado nesta fase. Nenhuma dependência de hospedagem paga.
+Automação local em TypeScript. O código atual inclui OAuth, publicação e scheduler;
+parte das instruções abaixo ainda descreve a entrega original da Fase A.
+`DRY_RUN=true` executa prévia somente leitura; `DRY_RUN=false` permite publicação real.
+Consulte [operações](docs/OPERATIONS.md) para as correções de segurança de 2026-10-04.
+Nenhuma dependência de hospedagem paga.
+
+## Onde escrever o post
+
+Abra a linha do calendário como página. Abaixo das propriedades, crie um título
+nativo de nível 2 chamado **Texto final** e escreva o texto abaixo dele. O campo
+**Post** da tabela é somente o nome do item. Use **Texto publicado** como alternativa,
+mantendo apenas uma dessas seções na página. O próximo título de nível 1 ou 2 encerra
+o trecho enviado ao LinkedIn. Veja [o contrato completo](docs/NOTION_SCHEMA.md).
 
 ## Começar no Windows
 

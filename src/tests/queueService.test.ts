@@ -20,6 +20,21 @@ function makeRepo(posts: ReturnType<typeof post>[]): NotionRepository {
 }
 
 describe('QueueService', () => {
+  it('preserva Aprovado quando prontidão é fórmula e limita o teste ao item escolhido', async () => {
+    const db = await openDatabase(':memory:');
+    try {
+      const notion = makeNotion();
+      vi.mocked(notion.getSchema).mockResolvedValue({
+        Status: {type:'select'}, 'Pronto para publicar': {type:'formula'},
+      });
+      const p = post();
+      const pubRepo = new PublicationRepository(db);
+      const svc = new QueueService(makeRepo([p,{...p,id:'another-post'}]),pubRepo,notion,silentLogger);
+      expect((await svc.enqueueEligiblePosts(p.id)).queued).toBe(1);
+      expect(notion.updateProperties).not.toHaveBeenCalled();
+      expect((await pubRepo.findAll()).map(p=>p.notion_page_id)).toEqual([p.id]);
+    } finally {db.close();}
+  });
   it('enfileira post elegível e atualiza Notion para Agendado', async () => {
     const db = await openDatabase(':memory:');
     const pubRepo = new PublicationRepository(db);

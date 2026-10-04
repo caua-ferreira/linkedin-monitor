@@ -23,7 +23,7 @@ export class QueueService {
     private readonly brainfrostCampaign = 'brainfrost_beta',
   ) {}
 
-  async enqueueEligiblePosts(): Promise<QueueResult> {
+  async enqueueEligiblePosts(pageId?: string): Promise<QueueResult> {
     const result: QueueResult = { queued: 0, skipped: 0, errors: 0 };
 
     let posts;
@@ -37,14 +37,17 @@ export class QueueService {
 
     // Lê o tipo do campo Status uma única vez para montar o payload de update.
     let statusType: 'select' | 'status' = 'select';
+    let keepApproved = true;
     try {
       const schema = await this.notion.getSchema();
       statusType = schema.Status?.type === 'status' ? 'status' : 'select';
+      keepApproved = schema['Pronto para publicar']?.type === 'formula';
     } catch {
       // Mantém 'select' como padrão — ambas as bases conhecidas usam select.
     }
 
     for (const rawPost of posts) {
+      if (pageId && rawPost.id !== pageId) continue;
       try {
         let post = rawPost;
         // Phase G: gera UTM para posts BrainFrost sem UTM antes de validar
@@ -89,7 +92,8 @@ export class QueueService {
         });
 
         try {
-          await this.notion.updateProperties(post.id, {
+          // A readiness formula can depend on Status=Aprovado. Preserve its truth.
+          if (!keepApproved) await this.notion.updateProperties(post.id, {
             Status: { [statusType]: { name: 'Agendado' } },
           });
         } catch {

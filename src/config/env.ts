@@ -13,7 +13,7 @@ const schema = z.object({
   LINKEDIN_CLIENT_ID: z.string().default(''),
   LINKEDIN_CLIENT_SECRET: z.string().default(''),
   LINKEDIN_REDIRECT_URI: z.string().default('http://localhost:3000/auth/linkedin/callback'),
-  LINKEDIN_API_VERSION: z.preprocess(v => (v === '' ? undefined : v), z.string().regex(/^\d{6}$/).default('202501')),
+  LINKEDIN_API_VERSION: z.preprocess(v => (v === '' ? undefined : v), z.string().regex(/^\d{6}$/).default('202609')),
   API_PORT: z.coerce.number().int().min(1024).max(65535).default(3000),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z.string().default(''),

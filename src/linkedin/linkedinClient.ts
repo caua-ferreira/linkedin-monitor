@@ -20,7 +20,7 @@ export class LinkedInClient {
   }
 
   async request<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
-    return retry(async () => {
+    const operation = async (): Promise<T> => {
       let response: Response;
       try {
         response = await this.fetcher(`${BASE}${path}`, {
@@ -56,6 +56,10 @@ export class LinkedInClient {
         return { headers: Object.fromEntries(response.headers.entries()) } as T;
       }
       try { return (await response.json()) as T; } catch { throw new SafeError('LINKEDIN_INVALID_JSON'); }
-    }, this.wait);
+    };
+    // A failed creation response may follow a successful write: never retry blindly.
+    return method === 'POST' && path === '/rest/posts'
+      ? operation()
+      : retry(operation, this.wait);
   }
 }

@@ -51,6 +51,13 @@ indisponíveis; ausência de acesso não equivale a zero.
 
 ## Conteúdo do item
 
+Na base nova, abra o título de uma linha como página e escreva no corpo abaixo
+das propriedades. O campo `Post` é somente o título, não o texto publicado.
+Use `/heading 2`, digite `Texto final` e escreva os parágrafos abaixo.
+Não crie uma coluna para o texto: o parser lê os blocos da página.
+`Pronto para publicar` também aceita fórmula booleana; quando ela depende de
+`Status = Aprovado`, o enfileiramento mantém esse status e registra a fila no banco operacional.
+
 ```text
 [heading 2] Texto final
 [paragraph] Texto pronto para ser publicado.

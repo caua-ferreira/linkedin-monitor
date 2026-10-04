@@ -60,7 +60,7 @@ describe('PostScheduler', () => {
     );
 
     const scheduler = new PostScheduler(
-      repoMock, pubRepo, await makeTokenRepo(db), notionMock, oauthConfig, '202501', silentLogger, mockFetch,
+      repoMock, pubRepo, await makeTokenRepo(db), notionMock, oauthConfig, '202501', silentLogger, mockFetch, false,
     );
 
     const result = await scheduler.publishDuePosts();
@@ -115,7 +115,7 @@ describe('PostScheduler', () => {
     const mockFetch = vi.fn<typeof fetch>().mockResolvedValue(json({}, 400));
 
     const scheduler = new PostScheduler(
-      repoMock, pubRepo, await makeTokenRepo(db), notionMock, oauthConfig, '202501', silentLogger, mockFetch,
+      repoMock, pubRepo, await makeTokenRepo(db), notionMock, oauthConfig, '202501', silentLogger, mockFetch, false,
     );
 
     const result = await scheduler.publishDuePosts();

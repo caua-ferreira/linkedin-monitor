@@ -43,6 +43,17 @@ function rowToPub(row: Record<string, unknown>): Publication {
 export class PublicationRepository {
   constructor(private readonly db: Client) {}
 
+  async claimQueued(id: string, pageId: string): Promise<boolean> {
+    const result = await this.db.execute({
+      sql: `UPDATE publications SET operational_state = 'publishing', updated_at = ?
+        WHERE id = ? AND notion_page_id = ? AND operational_state = 'queued'
+        AND NOT EXISTS (SELECT 1 FROM publications other WHERE other.notion_page_id = ?
+          AND other.id <> ? AND other.operational_state IN ('publishing','published','reconciliation_required'))`,
+      args: [new Date().toISOString(), id, pageId, pageId, id],
+    });
+    return result.rowsAffected === 1;
+  }
+
   async insert(pub: Omit<Publication, 'attempts' | 'created_at' | 'updated_at'>): Promise<void> {
     const now = new Date().toISOString();
     await this.db.execute({
