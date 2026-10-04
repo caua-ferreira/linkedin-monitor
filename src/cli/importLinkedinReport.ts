@@ -9,6 +9,8 @@ import { AnalyticsRepository } from '../storage/analyticsRepository.js';
 import { parseLinkedInXlsx } from '../analytics/providers/linkedinXlsxProvider.js';
 import { suggestCheckpoint } from '../analytics/analyticsModels.js';
 import { saveSnapshot } from '../analytics/analyticsService.js';
+import { NotionClient } from '../notion/notionClient.js';
+import { mapPage } from '../notion/notionRepository.js';
 
 function usage(): void {
   console.error(`
@@ -58,6 +60,11 @@ async function main(): Promise<void> {
   const db = openDatabase(env.DATABASE_PATH);
   const repo = new AnalyticsRepository(db);
 
+  // Cria cliente Notion somente se o token estiver disponível (para auto-match por Post URL)
+  const notionClient = env.NOTION_TOKEN.trim()
+    ? new NotionClient({ token: env.NOTION_TOKEN, dataSourceId: env.NOTION_DATA_SOURCE_ID, version: env.NOTION_API_VERSION, dryRun: true, logger })
+    : null;
+
   const buffer = readFileSync(xlsxPath);
   let result;
   try {
@@ -77,9 +84,28 @@ async function main(): Promise<void> {
 
   console.log(`\n${result.rows.length} linha(s) encontrada(s) no XLSX.\n`);
 
+  // Auto-match: tenta casar cada linha pelo Post URL do XLSX com a página do Notion
+  const urlToNotionId = new Map<string, string>();
+  if (notionClient && !notionPageIdArg) {
+    const uniqueUrls = [...new Set(result.rows.map(r => r.postUrl).filter(Boolean) as string[])];
+    if (uniqueUrls.length > 0) {
+      process.stdout.write(`Auto-matching ${uniqueUrls.length} Post URL(s) no Notion...\n`);
+      for (const url of uniqueUrls) {
+        try {
+          const pages = await notionClient.queryWithFilter({ property: 'Post URL', url: { equals: url } });
+          if (pages.length === 1) {
+            const post = mapPage(pages[0]!);
+            urlToNotionId.set(url, post.id);
+          }
+        } catch { /* ignora falhas de match individual */ }
+      }
+      process.stdout.write(`${urlToNotionId.size} match(es) encontrado(s).\n\n`);
+    }
+  }
+
   // Monta prévia
   const previews = result.rows.map((row, i) => {
-    const notionPageId = notionPageIdArg ?? null;
+    const notionPageId = notionPageIdArg ?? (row.postUrl ? urlToNotionId.get(row.postUrl) ?? null : null);
     const publishedAt = publishedAtArg ?? row.publishedAt ?? null;
 
     let postAgeMinutes: number | null = null;

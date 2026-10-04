@@ -18,6 +18,8 @@
     "collect": "tsx src/cli/importLinkedinReport.ts",
     "auth:start": "tsx src/cli/startAuth.ts",
     "auth:status": "tsx src/cli/authStatus.ts",
+    "utm:fill": "tsx src/cli/fillUtm.ts",
+    "linkedin:sync": "tsx src/cli/syncLinkedinPosts.ts",
     "drive:link": "tsx src/cli/linkDriveAssets.ts",
     "reconcile": "tsx src/cli/reconcile.ts",
     "build": "tsc"
