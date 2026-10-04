@@ -1,0 +1,42 @@
+name: Watch Inbox
+
+on:
+  schedule:
+    # Roda a cada 5 minutos
+    - cron: '*/5 * * * *'
+  workflow_dispatch: {}
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Escreve chave do Google Service Account
+        run: |
+          mkdir -p secrets
+          echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}' > secrets/google-service-account.json
+
+      - name: Roda watch:inbox --once
+        env:
+          DRY_RUN: 'false'
+          NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
+          NOTION_DATA_SOURCE_ID: ${{ vars.NOTION_DATA_SOURCE_ID }}
+          NOTION_API_VERSION: ${{ vars.NOTION_API_VERSION }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          GOOGLE_SERVICE_ACCOUNT_KEY_PATH: ./secrets/google-service-account.json
+          GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID: ${{ vars.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID }}
+          DATABASE_PATH: './data/linkedin-monitor.sqlite'
+          DATA_DIR: './data'
+          LOG_LEVEL: info
+        run: npm run watch:inbox -- --once

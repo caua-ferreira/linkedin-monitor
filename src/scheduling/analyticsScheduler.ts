@@ -16,8 +16,8 @@ export class AnalyticsScheduler {
     private readonly analyticsRepo?: AnalyticsRepository,
   ) {}
 
-  checkDueAnalytics(): void {
-    const published = this.publicationRepo.findPublished();
+  async checkDueAnalytics(): Promise<void> {
+    const published = await this.publicationRepo.findPublished();
     const now = Date.now();
 
     for (const pub of published) {
@@ -38,7 +38,7 @@ export class AnalyticsScheduler {
 
         // Avisa quando a janela passou mas nenhum snapshot foi coletado
         if (this.analyticsRepo && ageMinutes > window.maxMinutes) {
-          const collected = this.analyticsRepo.checkpointsFor(pub.notion_page_id);
+          const collected = await this.analyticsRepo.checkpointsFor(pub.notion_page_id);
           if (!collected.includes(window.checkpoint)) {
             this.logger.warn({
               action: 'analytics_overdue',

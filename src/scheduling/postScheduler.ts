@@ -28,7 +28,7 @@ export class PostScheduler {
   async publishDuePosts(): Promise<SchedulerResult> {
     const result: SchedulerResult = { published: 0, skipped: 0, errors: 0 };
     const now = new Date().toISOString();
-    const due = this.publicationRepo.findDueQueued(now);
+    const due = await this.publicationRepo.findDueQueued(now);
 
     if (due.length === 0) return result;
     this.logger.info({ action: 'scheduler_tick', due: due.length });

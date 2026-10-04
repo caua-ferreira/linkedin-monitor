@@ -103,4 +103,49 @@ describe('parseLinkedInXlsx', () => {
     const buf = makeXlsx(['Impressions'], [[100]]);
     expect(parseLinkedInXlsx(buf).source).toBe('linkedin_xlsx');
   });
+
+  // Formato Single Post Analytics (pivotado — cada linha é uma métrica)
+  it('single post analytics: extrai URL do header e mapeia métricas em PT-BR', () => {
+    const postUrl = 'https://www.linkedin.com/posts/cauaferreira_teste-share-123';
+    const buf = makeXlsx(
+      ['URL da publicação', postUrl, ''],
+      [
+        ['Data da publicação', '02/10/2026', null],
+        ['Impressões', '376', null],
+        ['Usuários alcançados', '221', null],
+        ['Reações', '6', null],
+        ['Comentários', '0', null],
+        ['Compartilhamentos', '0', null],
+        ['Salvamentos', '1', null],
+        ['Envios no LinkedIn', '0', null],
+        ['Visualizações do perfil a partir desta publicação', '3', null],
+        ['Seguidores obtidos com esta publicação', '2', null],
+      ],
+    );
+    const result = parseLinkedInXlsx(buf);
+    expect(result.rows).toHaveLength(1);
+    const r = result.rows[0]!;
+    expect(r.postUrl).toBe(postUrl);
+    expect(r.publishedAt).toBe('2026-10-02');
+    expect(r.impressions).toBe(376);
+    expect(r.reach).toBe(221);
+    expect(r.reactions).toBe(6);
+    expect(r.comments).toBe(0);
+    expect(r.shares).toBe(0);
+    expect(r.saves).toBe(1);
+    expect(r.sends).toBe(0);
+    expect(r.profileViews).toBe(3);
+    expect(r.followersGained).toBe(2);
+  });
+
+  it('single post analytics: decodifica URL percent-encoded do header', () => {
+    const encodedUrl = 'https://www.linkedin.com/posts/cauaferreira_teste-%C3%A9-share-123';
+    const decodedUrl = 'https://www.linkedin.com/posts/cauaferreira_teste-é-share-123';
+    const buf = makeXlsx(
+      ['URL da publicação', encodedUrl, ''],
+      [['Impressões', '100', null]],
+    );
+    const result = parseLinkedInXlsx(buf);
+    expect(result.rows[0]!.postUrl).toBe(decodedUrl);
+  });
 });

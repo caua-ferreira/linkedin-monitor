@@ -69,14 +69,14 @@ export class QueueService {
         const scheduledAt = validation.scheduledAt!;
         const idempotencyKey = `${post.id}:${scheduledAt}`;
 
-        if (this.publicationRepo.isActiveByIdempotencyKey(idempotencyKey)) {
+        if (await this.publicationRepo.isActiveByIdempotencyKey(idempotencyKey)) {
           this.logger.info({ action: 'queue_already_exists', postId: post.id });
           result.skipped++;
           continue;
         }
 
         const pubId = randomUUID();
-        this.publicationRepo.insert({
+        await this.publicationRepo.insert({
           id: pubId,
           notion_page_id: post.id,
           idempotency_key: idempotencyKey,

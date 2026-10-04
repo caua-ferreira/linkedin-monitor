@@ -38,7 +38,7 @@ async function tick(
   }
 
   try {
-    analyticsScheduler.checkDueAnalytics();
+    await analyticsScheduler.checkDueAnalytics();
   } catch (error) {
     logger.error({ action: 'analytics_cycle_failed', code: errorCode(error) });
   }
@@ -47,7 +47,8 @@ async function tick(
 async function main() {
   const env = loadEnv();
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
-  const db = openDatabase(env.DATABASE_PATH);
+  const dbUrl = env.TURSO_DATABASE_URL || env.DATABASE_PATH;
+  const db = await openDatabase(dbUrl, env.TURSO_AUTH_TOKEN || undefined);
   const tokenRepo = new TokenRepository(db);
   const publicationRepo = new PublicationRepository(db);
   const notion = new NotionClient({

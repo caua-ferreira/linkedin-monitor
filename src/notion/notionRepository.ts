@@ -33,7 +33,10 @@ function value(property: Property | undefined): string {
 export function mapPage(page: NotionPage): EditorialPost {
   if (schemaProblems(page.properties).length) throw new SafeError('NOTION_PAGE_SCHEMA_MISMATCH');
   const p = page.properties;
-  const ready = p['Pronto para publicar']?.checkbox;
+  const readyProp = p['Pronto para publicar'];
+  const ready = readyProp?.type === 'formula'
+    ? Boolean((readyProp as unknown as Record<string, Record<string, unknown>>).formula?.boolean)
+    : readyProp?.checkbox;
   if (typeof ready !== 'boolean') throw new SafeError('NOTION_PROPERTY_INVALID');
   const date = z.object({ end: z.string().nullable().optional() }).nullable().safeParse(p.Data?.date);
   if (!date.success) throw new SafeError('NOTION_PROPERTY_INVALID');

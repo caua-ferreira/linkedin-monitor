@@ -1,10 +1,6 @@
 import * as XLSX from 'xlsx';
 import type { AnalyticsSource } from '../analyticsModels.js';
 
-/**
- * Linhas brutas extraídas do XLSX do LinkedIn.
- * Cada linha representa um post. Os campos nulos indicam coluna ausente/ambígua.
- */
 export interface XlsxRow {
   postUrl: string | null;
   publishedAt: string | null;
@@ -26,66 +22,70 @@ export interface XlsxRow {
 
 export interface XlsxParseResult {
   rows: XlsxRow[];
-  /** Colunas do arquivo que não foram mapeadas para nenhum campo conhecido. */
   unmappedColumns: string[];
   source: AnalyticsSource;
 }
 
-// Mapeamento coluna LinkedIn → campo interno.
-// Chaves em minúsculo para comparação case-insensitive.
+// Mapeamento "All Posts Analytics" (inglês) coluna → campo interno
 const COLUMN_MAP: Record<string, keyof XlsxRow> = {
-  // URL do post
   'post url': 'postUrl',
   'url': 'postUrl',
   'link': 'postUrl',
-  // Data de publicação
   'post published date': 'publishedAt',
   'published date': 'publishedAt',
   'date published': 'publishedAt',
   'post date': 'publishedAt',
   'date': 'publishedAt',
-  // Título / conteúdo
   'post title': 'title',
   'title': 'title',
   'content': 'title',
   'update': 'title',
-  // Impressões
   'impressions': 'impressions',
   'post impressions': 'impressions',
-  // Alcance
   'members reached': 'reach',
   'unique views': 'reach',
   'reach': 'reach',
   'unique impressions': 'reach',
-  // Reações
   'reactions': 'reactions',
   'likes': 'reactions',
-  // Comentários
   'comments': 'comments',
-  // Compartilhamentos
   'reposts': 'shares',
   'shares': 'shares',
   'reshares': 'shares',
-  // Salvamentos
   'saves': 'saves',
   'bookmarks': 'saves',
-  // Envios
   'sends': 'sends',
-  // Cliques em perfil
   'profile views': 'profileViews',
   'profile views from post': 'profileViews',
-  // Novos seguidores
   'followers gained': 'followersGained',
   'new followers': 'followersGained',
-  // Cliques
   'post clicks': 'linkClicks',
   'clicks': 'linkClicks',
   'link clicks': 'linkClicks',
-  // CTA premium
   'premium cta clicks': 'premiumCtaClicks',
 };
 
-// Colunas que devem ser ignoradas silenciosamente (métricas derivadas, metadados)
+// Mapeamento "Single Post Analytics" (português) nome da métrica → campo interno
+const PT_METRIC_MAP: Record<string, keyof XlsxRow> = {
+  'impressões': 'impressions',
+  'usuários alcançados': 'reach',
+  'membros alcançados': 'reach',
+  'reações': 'reactions',
+  'comentários': 'comments',
+  'compartilhamentos': 'shares',
+  'republicações': 'shares',
+  'salvamentos': 'saves',
+  'envios no linkedin': 'sends',
+  'envios': 'sends',
+  'visualizações do perfil a partir desta publicação': 'profileViews',
+  'visualizações do perfil': 'profileViews',
+  'seguidores obtidos com esta publicação': 'followersGained',
+  'novos seguidores': 'followersGained',
+  'cliques no link': 'linkClicks',
+  'cliques': 'linkClicks',
+  'engajamentos no botão premium personalizado': 'premiumCtaClicks',
+};
+
 const IGNORE_COLUMNS = new Set([
   'engagement rate',
   'engagement rate (%)',
@@ -93,16 +93,17 @@ const IGNORE_COLUMNS = new Set([
   'click through rate',
 ]);
 
+const LINKEDIN_URL_RE = /https?:\/\/(www\.)?linkedin\.com\//i;
+
 function parseNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
   return Number.isFinite(n) ? Math.round(n) : null;
 }
 
-function parseDate(value: unknown): string | null {
+function parseDate(value: unknown, ptBr = false): string | null {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number') {
-    // Número serial do Excel
     const d = XLSX.SSF.parse_date_code(value);
     if (!d) return null;
     return `${String(d.y).padStart(4, '0')}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
@@ -110,16 +111,56 @@ function parseDate(value: unknown): string | null {
   const s = String(value).trim();
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   if (/^\d{1,2}\/\d{1,2}\/\d{4}/.test(s)) {
-    const [m, d, y] = s.split('/').map(Number);
+    const parts = s.split('/').map(Number);
+    // PT-BR: DD/MM/YYYY; EN: MM/DD/YYYY
+    const [a, b, y] = parts as [number, number, number];
+    const [d, m] = ptBr ? [a, b] : [b, a];
     return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   }
   return s || null;
 }
 
+/**
+ * Formato "Single Post Analytics" do LinkedIn:
+ * - Linha 0 (header lido pelo XLSX): ["URL da publicação", "{post_url}", ""]
+ * - Cada linha de dado tem: col[0]=nome_da_métrica, col[1]=valor
+ * Retorna uma única XlsxRow com todos os campos preenchidos.
+ */
+function parseSinglePostFormat(raw: Record<string, unknown>[]): XlsxRow {
+  const headers = Object.keys(raw[0]!);
+  const urlColumn = headers.find(h => LINKEDIN_URL_RE.test(h))!;
+  const labelColumn = headers.find(h => !LINKEDIN_URL_RE.test(h) && h !== '__EMPTY')!;
+
+  const postUrl = (() => { try { return decodeURIComponent(urlColumn); } catch { return urlColumn; } })();
+  const metrics = new Map<string, unknown>();
+
+  for (const row of raw) {
+    const label = String(row[labelColumn] ?? '').trim().toLowerCase();
+    const value = row[urlColumn];
+    if (label && !metrics.has(label)) metrics.set(label, value); // primeira ocorrência
+  }
+
+  const result: XlsxRow = {
+    postUrl,
+    publishedAt: parseDate(metrics.get('data da publicação') ?? null, true),
+    title: null,
+    impressions: null, reach: null, reactions: null, comments: null,
+    shares: null, saves: null, sends: null, profileViews: null,
+    followersGained: null, linkClicks: null, premiumCtaClicks: null,
+    rawRow: Object.fromEntries(metrics),
+    warnings: [],
+  };
+
+  for (const [ptName, field] of Object.entries(PT_METRIC_MAP)) {
+    const val = metrics.get(ptName);
+    if (val !== undefined) (result[field] as number | null) = parseNumber(val);
+  }
+
+  return result;
+}
+
 export function parseLinkedInXlsx(buffer: Buffer): XlsxParseResult {
   const workbook = XLSX.read(buffer, { type: 'buffer', cellDates: false });
-
-  // Procura a primeira aba com dados
   const sheetName = workbook.SheetNames[0];
   if (!sheetName) throw new Error('XLSX_NO_SHEETS');
   const sheet = workbook.Sheets[sheetName]!;
@@ -131,8 +172,15 @@ export function parseLinkedInXlsx(buffer: Buffer): XlsxParseResult {
 
   if (raw.length === 0) throw new Error('XLSX_EMPTY_SHEET');
 
-  // Normaliza headers para detectar mapeamento
   const headers = Object.keys(raw[0]!);
+
+  // Detecta formato Single Post Analytics: header contém uma URL do LinkedIn
+  if (headers.some(h => LINKEDIN_URL_RE.test(h))) {
+    const row = parseSinglePostFormat(raw);
+    return { rows: [row], unmappedColumns: [], source: 'linkedin_xlsx' };
+  }
+
+  // Formato All Posts Analytics (uma linha por post)
   const mapped = new Map<string, keyof XlsxRow>();
   const unmappedColumns: string[] = [];
 

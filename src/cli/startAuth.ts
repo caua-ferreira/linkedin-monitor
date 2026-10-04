@@ -14,7 +14,7 @@ async function main(): Promise<void> {
   }
 
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
-  const db = openDatabase(env.DATABASE_PATH);
+  const db = await openDatabase(env.DATABASE_PATH);
   const tokenRepo = new TokenRepository(db);
 
   const app = createServer(

@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { Client } from '@libsql/client';
 
 export interface LinkedInToken {
   id: 1;
@@ -13,61 +13,64 @@ export interface LinkedInToken {
 }
 
 export class TokenRepository {
-  constructor(private readonly db: DatabaseSync) {}
+  constructor(private readonly db: Client) {}
 
-  save(token: Omit<LinkedInToken, 'id' | 'created_at' | 'updated_at'> & { created_at?: string }): void {
+  async save(token: Omit<LinkedInToken, 'id' | 'created_at' | 'updated_at'> & { created_at?: string }): Promise<void> {
     const now = new Date().toISOString();
-    const existing = this.get();
+    const existing = await this.get();
     if (existing) {
-      this.db.prepare(`
-        UPDATE linkedin_tokens SET
-          member_urn = $member_urn,
-          access_token = $access_token,
-          access_token_expires_at = $access_token_expires_at,
-          refresh_token = $refresh_token,
-          refresh_token_expires_at = $refresh_token_expires_at,
-          authorized_scopes = $authorized_scopes,
-          updated_at = $updated_at
-        WHERE id = 1
-      `).run({
-        $member_urn: token.member_urn ?? null,
-        $access_token: token.access_token,
-        $access_token_expires_at: token.access_token_expires_at,
-        $refresh_token: token.refresh_token ?? null,
-        $refresh_token_expires_at: token.refresh_token_expires_at ?? null,
-        $authorized_scopes: token.authorized_scopes,
-        $updated_at: now,
+      await this.db.execute({
+        sql: `UPDATE linkedin_tokens SET
+          member_urn = ?, access_token = ?, access_token_expires_at = ?,
+          refresh_token = ?, refresh_token_expires_at = ?,
+          authorized_scopes = ?, updated_at = ?
+        WHERE id = 1`,
+        args: [
+          token.member_urn ?? null, token.access_token, token.access_token_expires_at,
+          token.refresh_token ?? null, token.refresh_token_expires_at ?? null,
+          token.authorized_scopes, now,
+        ],
       });
     } else {
-      this.db.prepare(`
-        INSERT INTO linkedin_tokens
+      await this.db.execute({
+        sql: `INSERT INTO linkedin_tokens
           (id, member_urn, access_token, access_token_expires_at,
            refresh_token, refresh_token_expires_at, authorized_scopes, created_at, updated_at)
-        VALUES (1, $member_urn, $access_token, $access_token_expires_at,
-                $refresh_token, $refresh_token_expires_at, $authorized_scopes, $created_at, $updated_at)
-      `).run({
-        $member_urn: token.member_urn ?? null,
-        $access_token: token.access_token,
-        $access_token_expires_at: token.access_token_expires_at,
-        $refresh_token: token.refresh_token ?? null,
-        $refresh_token_expires_at: token.refresh_token_expires_at ?? null,
-        $authorized_scopes: token.authorized_scopes,
-        $created_at: token.created_at ?? now,
-        $updated_at: now,
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        args: [
+          token.member_urn ?? null, token.access_token, token.access_token_expires_at,
+          token.refresh_token ?? null, token.refresh_token_expires_at ?? null,
+          token.authorized_scopes, token.created_at ?? now, now,
+        ],
       });
     }
   }
 
-  get(): LinkedInToken | null {
-    return (this.db.prepare('SELECT * FROM linkedin_tokens WHERE id = 1').get() as LinkedInToken | undefined) ?? null;
+  async get(): Promise<LinkedInToken | null> {
+    const result = await this.db.execute('SELECT * FROM linkedin_tokens WHERE id = 1');
+    if (!result.rows.length) return null;
+    const r = result.rows[0] as unknown as Record<string, unknown>;
+    return {
+      id: 1,
+      member_urn: (r.member_urn as string | null) ?? null,
+      access_token: r.access_token as string,
+      access_token_expires_at: r.access_token_expires_at as string,
+      refresh_token: (r.refresh_token as string | null) ?? null,
+      refresh_token_expires_at: (r.refresh_token_expires_at as string | null) ?? null,
+      authorized_scopes: r.authorized_scopes as string,
+      created_at: r.created_at as string,
+      updated_at: r.updated_at as string,
+    };
   }
 
-  updateMemberUrn(urn: string): void {
-    this.db.prepare('UPDATE linkedin_tokens SET member_urn = $urn, updated_at = $now WHERE id = 1')
-      .run({ $urn: urn, $now: new Date().toISOString() });
+  async updateMemberUrn(urn: string): Promise<void> {
+    await this.db.execute({
+      sql: 'UPDATE linkedin_tokens SET member_urn = ?, updated_at = ? WHERE id = 1',
+      args: [urn, new Date().toISOString()],
+    });
   }
 
-  clear(): void {
-    this.db.prepare('DELETE FROM linkedin_tokens WHERE id = 1').run();
+  async clear(): Promise<void> {
+    await this.db.execute('DELETE FROM linkedin_tokens WHERE id = 1');
   }
 }

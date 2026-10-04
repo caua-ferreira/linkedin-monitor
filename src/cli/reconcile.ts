@@ -22,9 +22,10 @@ function minutesAgo(isoDate: string): number {
   return (Date.now() - new Date(isoDate).getTime()) / 60_000;
 }
 
-function main() {
+async function main() {
   const env = loadEnv(process.env, false);
-  const db = openDatabase(env.DATABASE_PATH);
+  const dbUrl = env.TURSO_DATABASE_URL || env.DATABASE_PATH;
+  const db = await openDatabase(dbUrl, env.TURSO_AUTH_TOKEN || undefined);
   const pubRepo = new PublicationRepository(db);
   const analyticsRepo = new AnalyticsRepository(db);
   const tokenRepo = new TokenRepository(db);
@@ -34,7 +35,7 @@ function main() {
     findings.push({ classification, check, postId, detail });
 
   // 1. Auth token
-  const token = tokenRepo.get();
+  const token = await tokenRepo.get();
   if (!token) {
     flag('MANUAL_REVIEW', 'auth_missing', 'Nenhum token LinkedIn salvo. Execute npm run auth:start.');
   } else {
@@ -46,7 +47,7 @@ function main() {
     }
   }
 
-  const publications = pubRepo.findAll();
+  const publications = await pubRepo.findAll();
 
   for (const pub of publications) {
     // 2. Stale queued
@@ -86,7 +87,7 @@ function main() {
     // 6. Analytics checkpoints overdue
     if (pub.operational_state === 'published' && pub.published_at) {
       const ageMin = minutesAgo(pub.published_at);
-      const existingCheckpoints = analyticsRepo.checkpointsFor(pub.notion_page_id);
+      const existingCheckpoints = await analyticsRepo.checkpointsFor(pub.notion_page_id);
       for (const cp of CHECKPOINTS) {
         if (ageMin >= CHECKPOINT_MIN[cp] && !existingCheckpoints.includes(cp)) {
           flag('SAFE_FIX', 'analytics_overdue',
@@ -129,7 +130,7 @@ function main() {
   process.exitCode = findings.some(f => f.classification === 'MANUAL_REVIEW') ? 1 : 0;
 }
 
-try { main(); } catch (err) {
+main().catch(err => {
   console.error(err instanceof Error ? err.message : err);
   process.exitCode = 1;
-}
+});

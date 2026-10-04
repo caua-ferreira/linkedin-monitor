@@ -6,9 +6,9 @@ import { isTokenExpired } from '../linkedin/linkedinAuth.js';
 
 async function main(): Promise<void> {
   const env = loadEnv(process.env, false);
-  const db = openDatabase(env.DATABASE_PATH);
+  const db = await openDatabase(env.DATABASE_PATH);
   const repo = new TokenRepository(db);
-  const token = repo.get();
+  const token = await repo.get();
 
   console.log('\n=== LinkedIn Auth Status ===\n');
 

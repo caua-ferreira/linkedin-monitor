@@ -57,7 +57,7 @@ async function main(): Promise<void> {
 
   const env = loadEnv(process.env, false);
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
-  const db = openDatabase(env.DATABASE_PATH);
+  const db = await openDatabase(env.DATABASE_PATH);
   const repo = new AnalyticsRepository(db);
 
   // Cria cliente Notion somente se o token estiver disponível (para auto-match por Post URL)

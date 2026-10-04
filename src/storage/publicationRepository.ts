@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { Client } from '@libsql/client';
 
 export type OperationalState =
   | 'idle'
@@ -23,90 +23,110 @@ export interface Publication {
   updated_at: string;
 }
 
-export class PublicationRepository {
-  constructor(private readonly db: DatabaseSync) {}
+function rowToPub(row: Record<string, unknown>): Publication {
+  return {
+    id: row.id as string,
+    notion_page_id: row.notion_page_id as string,
+    idempotency_key: row.idempotency_key as string,
+    operational_state: row.operational_state as OperationalState,
+    scheduled_at: (row.scheduled_at as string | null) ?? null,
+    linkedin_post_urn: (row.linkedin_post_urn as string | null) ?? null,
+    linkedin_post_url: (row.linkedin_post_url as string | null) ?? null,
+    published_at: (row.published_at as string | null) ?? null,
+    error_code: (row.error_code as string | null) ?? null,
+    attempts: typeof row.attempts === 'bigint' ? Number(row.attempts) : (row.attempts as number),
+    created_at: row.created_at as string,
+    updated_at: row.updated_at as string,
+  };
+}
 
-  insert(pub: Omit<Publication, 'attempts' | 'created_at' | 'updated_at'>): void {
+export class PublicationRepository {
+  constructor(private readonly db: Client) {}
+
+  async insert(pub: Omit<Publication, 'attempts' | 'created_at' | 'updated_at'>): Promise<void> {
     const now = new Date().toISOString();
-    this.db.prepare(`
-      INSERT INTO publications
+    await this.db.execute({
+      sql: `INSERT INTO publications
         (id, notion_page_id, idempotency_key, operational_state, scheduled_at,
          linkedin_post_urn, linkedin_post_url, published_at, error_code,
          attempts, created_at, updated_at)
-      VALUES
-        ($id, $notion_page_id, $idempotency_key, $operational_state, $scheduled_at,
-         $linkedin_post_urn, $linkedin_post_url, $published_at, $error_code,
-         0, $created_at, $updated_at)
-    `).run({
-      $id: pub.id, $notion_page_id: pub.notion_page_id, $idempotency_key: pub.idempotency_key,
-      $operational_state: pub.operational_state, $scheduled_at: pub.scheduled_at ?? null,
-      $linkedin_post_urn: pub.linkedin_post_urn ?? null, $linkedin_post_url: pub.linkedin_post_url ?? null,
-      $published_at: pub.published_at ?? null, $error_code: pub.error_code ?? null,
-      $created_at: now, $updated_at: now,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+      args: [
+        pub.id, pub.notion_page_id, pub.idempotency_key, pub.operational_state,
+        pub.scheduled_at ?? null, pub.linkedin_post_urn ?? null, pub.linkedin_post_url ?? null,
+        pub.published_at ?? null, pub.error_code ?? null, now, now,
+      ],
     });
   }
 
-  updateState(
+  async updateState(
     id: string,
     state: OperationalState,
     extra: Partial<Pick<Publication, 'linkedin_post_urn' | 'linkedin_post_url' | 'published_at' | 'error_code'>> = {},
-  ): void {
+  ): Promise<void> {
     const now = new Date().toISOString();
-    this.db.prepare(`
-      UPDATE publications SET
-        operational_state = $state,
-        linkedin_post_urn = COALESCE($urn, linkedin_post_urn),
-        linkedin_post_url = COALESCE($url, linkedin_post_url),
-        published_at = COALESCE($published_at, published_at),
-        error_code = COALESCE($error_code, error_code),
+    await this.db.execute({
+      sql: `UPDATE publications SET
+        operational_state = ?,
+        linkedin_post_urn = COALESCE(?, linkedin_post_urn),
+        linkedin_post_url = COALESCE(?, linkedin_post_url),
+        published_at = COALESCE(?, published_at),
+        error_code = COALESCE(?, error_code),
         attempts = attempts + 1,
-        updated_at = $now
-      WHERE id = $id
-    `).run({
-      $id: id, $state: state,
-      $urn: extra.linkedin_post_urn ?? null, $url: extra.linkedin_post_url ?? null,
-      $published_at: extra.published_at ?? null, $error_code: extra.error_code ?? null,
-      $now: now,
+        updated_at = ?
+      WHERE id = ?`,
+      args: [
+        state,
+        extra.linkedin_post_urn ?? null, extra.linkedin_post_url ?? null,
+        extra.published_at ?? null, extra.error_code ?? null,
+        now, id,
+      ],
     });
   }
 
-  findByNotionPageId(notionPageId: string): Publication | null {
-    return (this.db.prepare(
-      'SELECT * FROM publications WHERE notion_page_id = $id ORDER BY created_at DESC LIMIT 1',
-    ).get({ $id: notionPageId }) as Publication | undefined) ?? null;
+  async findByNotionPageId(notionPageId: string): Promise<Publication | null> {
+    const result = await this.db.execute({
+      sql: 'SELECT * FROM publications WHERE notion_page_id = ? ORDER BY created_at DESC LIMIT 1',
+      args: [notionPageId],
+    });
+    return result.rows.length ? rowToPub(result.rows[0] as unknown as Record<string, unknown>) : null;
   }
 
-  /** Retorna true se já existe registro em estado que bloqueia nova tentativa de publicação. */
-  existsByIdempotencyKey(key: string): boolean {
-    return this.db.prepare(
-      "SELECT 1 FROM publications WHERE idempotency_key = $key AND operational_state IN ('publishing','published','reconciliation_required')",
-    ).get({ $key: key }) !== undefined;
+  async existsByIdempotencyKey(key: string): Promise<boolean> {
+    const result = await this.db.execute({
+      sql: "SELECT 1 FROM publications WHERE idempotency_key = ? AND operational_state IN ('publishing','published','reconciliation_required')",
+      args: [key],
+    });
+    return result.rows.length > 0;
   }
 
-  /** Retorna true se já existe registro ativo (não-falho) — usado pelo QueueService para evitar re-enfileiramento. */
-  isActiveByIdempotencyKey(key: string): boolean {
-    return this.db.prepare(
-      "SELECT 1 FROM publications WHERE idempotency_key = $key AND operational_state NOT IN ('failed')",
-    ).get({ $key: key }) !== undefined;
+  async isActiveByIdempotencyKey(key: string): Promise<boolean> {
+    const result = await this.db.execute({
+      sql: "SELECT 1 FROM publications WHERE idempotency_key = ? AND operational_state NOT IN ('failed')",
+      args: [key],
+    });
+    return result.rows.length > 0;
   }
 
-  findAll(): Publication[] {
-    return this.db.prepare(
+  async findAll(): Promise<Publication[]> {
+    const result = await this.db.execute(
       'SELECT * FROM publications ORDER BY created_at DESC',
-    ).all() as unknown as Publication[];
+    );
+    return result.rows.map(r => rowToPub(r as unknown as Record<string, unknown>));
   }
 
-  /** Posts com estado 'queued' cujo scheduled_at já passou. */
-  findDueQueued(nowIso: string): Publication[] {
-    return this.db.prepare(
-      "SELECT * FROM publications WHERE operational_state = 'queued' AND scheduled_at IS NOT NULL AND scheduled_at <= $now ORDER BY scheduled_at ASC",
-    ).all({ $now: nowIso }) as unknown as Publication[];
+  async findDueQueued(nowIso: string): Promise<Publication[]> {
+    const result = await this.db.execute({
+      sql: "SELECT * FROM publications WHERE operational_state = 'queued' AND scheduled_at IS NOT NULL AND scheduled_at <= ? ORDER BY scheduled_at ASC",
+      args: [nowIso],
+    });
+    return result.rows.map(r => rowToPub(r as unknown as Record<string, unknown>));
   }
 
-  /** Posts publicados, ordenados por published_at (para analytics). */
-  findPublished(): Publication[] {
-    return this.db.prepare(
+  async findPublished(): Promise<Publication[]> {
+    const result = await this.db.execute(
       "SELECT * FROM publications WHERE operational_state = 'published' ORDER BY published_at ASC",
-    ).all() as unknown as Publication[];
+    );
+    return result.rows.map(r => rowToPub(r as unknown as Record<string, unknown>));
   }
 }

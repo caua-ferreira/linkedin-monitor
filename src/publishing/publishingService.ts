@@ -59,7 +59,7 @@ export async function publishPost(
   }
 
   // 3. Idempotência — bloqueia apenas estados definitivos
-  if (!opts.existingPubId && publicationRepo.existsByIdempotencyKey(idempotencyKey)) {
+  if (!opts.existingPubId && await publicationRepo.existsByIdempotencyKey(idempotencyKey)) {
     throw new SafeError('PUBLISH_ALREADY_ATTEMPTED');
   }
 
@@ -72,7 +72,7 @@ export async function publishPost(
   if (schedulerIdValue) throw new SafeError('PUBLISH_ALREADY_REGISTERED_IN_NOTION');
 
   // 5. Obtém token e renova se necessário
-  const tokenRecord = tokenRepo.get();
+  const tokenRecord = await tokenRepo.get();
   if (!tokenRecord) throw new SafeError('LINKEDIN_NOT_AUTHENTICATED');
 
   let accessToken = tokenRecord.access_token;
@@ -80,7 +80,7 @@ export async function publishPost(
     if (!tokenRecord.refresh_token) throw new SafeError('LINKEDIN_TOKEN_EXPIRED_NO_REFRESH');
     logger.info({ action: 'token_refresh', member_urn: tokenRecord.member_urn ?? 'unknown' });
     const refreshed = await refreshAccessToken(tokenRecord.refresh_token, oauthConfig);
-    tokenRepo.save({
+    await tokenRepo.save({
       member_urn: tokenRecord.member_urn,
       access_token: refreshed.accessToken,
       access_token_expires_at: refreshed.accessTokenExpiresAt,
@@ -95,15 +95,15 @@ export async function publishPost(
   let memberUrn = tokenRecord.member_urn;
   if (!memberUrn) {
     memberUrn = await getMemberUrn(accessToken, opts.fetch);
-    tokenRepo.updateMemberUrn(memberUrn);
+    await tokenRepo.updateMemberUrn(memberUrn);
   }
 
   // 7. Cria ou atualiza o registro de publicação para estado 'publishing'
   const pubId = opts.existingPubId ?? randomUUID();
   if (opts.existingPubId) {
-    publicationRepo.updateState(pubId, 'publishing');
+    await publicationRepo.updateState(pubId, 'publishing');
   } else {
-    publicationRepo.insert({
+    await publicationRepo.insert({
       id: pubId,
       notion_page_id: post.id,
       idempotency_key: idempotencyKey,
@@ -133,14 +133,14 @@ export async function publishPost(
       ['LINKEDIN_TIMEOUT', 'LINKEDIN_NETWORK_ERROR', 'LINKEDIN_POST_NO_URN'].includes(error.code);
     const state = isAmbiguous ? 'reconciliation_required' : 'failed';
     const code = error instanceof SafeError ? error.code : 'UNKNOWN';
-    publicationRepo.updateState(pubId, state, { error_code: code });
+    await publicationRepo.updateState(pubId, state, { error_code: code });
     logger.error({ action: 'publish_failed', postId: post.id, state, code });
     throw error;
   }
 
   // 9. Persiste URN IMEDIATAMENTE antes de atualizar o Notion
   const publishedAt = new Date().toISOString();
-  publicationRepo.updateState(pubId, 'published', {
+  await publicationRepo.updateState(pubId, 'published', {
     linkedin_post_urn: postResult.postUrn,
     linkedin_post_url: postResult.postUrl,
     published_at: publishedAt,

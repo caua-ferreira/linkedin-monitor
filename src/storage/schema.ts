@@ -1,9 +1,7 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { Client } from '@libsql/client';
 
-export function applyMigrations(db: DatabaseSync): void {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY);
-
+export async function applyMigrations(db: Client): Promise<void> {
+  await db.executeMultiple(`
     CREATE TABLE IF NOT EXISTS linkedin_tokens (
       id INTEGER PRIMARY KEY CHECK (id = 1),
       member_urn TEXT,
@@ -52,6 +50,11 @@ export function applyMigrations(db: DatabaseSync): void {
       source TEXT NOT NULL,
       raw_payload TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS drive_processed_files (
+      drive_file_id TEXT PRIMARY KEY,
+      processed_at TEXT NOT NULL
     );
   `);
 }

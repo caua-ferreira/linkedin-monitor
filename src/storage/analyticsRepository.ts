@@ -1,67 +1,88 @@
-import { DatabaseSync } from 'node:sqlite';
+import type { Client } from '@libsql/client';
 import type { AnalyticsSnapshot } from '../analytics/analyticsModels.js';
 
-export class AnalyticsRepository {
-  constructor(private readonly db: DatabaseSync) {}
+function toNum(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'bigint') return Number(v);
+  return typeof v === 'number' ? v : null;
+}
 
-  checkpointsFor(notionPageId: string): string[] {
-    return (this.db.prepare(
-      'SELECT DISTINCT checkpoint FROM analytics_snapshots WHERE notion_page_id = $id AND checkpoint IS NOT NULL',
-    ).all({ $id: notionPageId }) as { checkpoint: string }[]).map(r => r.checkpoint);
+function rowToSnapshot(row: Record<string, unknown>): AnalyticsSnapshot {
+  return {
+    id: row.id as string,
+    notion_page_id: row.notion_page_id as string,
+    linkedin_post_urn: (row.linkedin_post_urn as string | null) ?? null,
+    checkpoint: (row.checkpoint as import('../analytics/analyticsModels.js').Checkpoint | null) ?? null,
+    captured_at: row.captured_at as string,
+    post_age_minutes: toNum(row.post_age_minutes),
+    impressions: toNum(row.impressions),
+    reach: toNum(row.reach),
+    reactions: toNum(row.reactions),
+    comments: toNum(row.comments),
+    shares: toNum(row.shares),
+    saves: toNum(row.saves),
+    sends: toNum(row.sends),
+    profile_views: toNum(row.profile_views),
+    followers_gained: toNum(row.followers_gained),
+    link_clicks: toNum(row.link_clicks),
+    premium_cta_clicks: toNum(row.premium_cta_clicks),
+    source: row.source as AnalyticsSnapshot['source'],
+    raw_payload: row.raw_payload as string,
+    created_at: row.created_at as string,
+  };
+}
+
+export class AnalyticsRepository {
+  constructor(private readonly db: Client) {}
+
+  async checkpointsFor(notionPageId: string): Promise<string[]> {
+    const result = await this.db.execute({
+      sql: 'SELECT DISTINCT checkpoint FROM analytics_snapshots WHERE notion_page_id = ? AND checkpoint IS NOT NULL',
+      args: [notionPageId],
+    });
+    return result.rows.map(r => r.checkpoint as string);
   }
 
-  insert(snapshot: AnalyticsSnapshot): void {
-    this.db.prepare(`
-      INSERT INTO analytics_snapshots
+  async insert(snapshot: AnalyticsSnapshot): Promise<void> {
+    await this.db.execute({
+      sql: `INSERT INTO analytics_snapshots
         (id, notion_page_id, linkedin_post_urn, checkpoint, captured_at, post_age_minutes,
          impressions, reach, reactions, comments, shares, saves, sends,
          profile_views, followers_gained, link_clicks, premium_cta_clicks,
          source, raw_payload, created_at)
-      VALUES
-        ($id, $notion_page_id, $linkedin_post_urn, $checkpoint, $captured_at, $post_age_minutes,
-         $impressions, $reach, $reactions, $comments, $shares, $saves, $sends,
-         $profile_views, $followers_gained, $link_clicks, $premium_cta_clicks,
-         $source, $raw_payload, $created_at)
-    `).run({
-      $id: snapshot.id,
-      $notion_page_id: snapshot.notion_page_id,
-      $linkedin_post_urn: snapshot.linkedin_post_urn ?? null,
-      $checkpoint: snapshot.checkpoint ?? null,
-      $captured_at: snapshot.captured_at,
-      $post_age_minutes: snapshot.post_age_minutes ?? null,
-      $impressions: snapshot.impressions ?? null,
-      $reach: snapshot.reach ?? null,
-      $reactions: snapshot.reactions ?? null,
-      $comments: snapshot.comments ?? null,
-      $shares: snapshot.shares ?? null,
-      $saves: snapshot.saves ?? null,
-      $sends: snapshot.sends ?? null,
-      $profile_views: snapshot.profile_views ?? null,
-      $followers_gained: snapshot.followers_gained ?? null,
-      $link_clicks: snapshot.link_clicks ?? null,
-      $premium_cta_clicks: snapshot.premium_cta_clicks ?? null,
-      $source: snapshot.source,
-      $raw_payload: snapshot.raw_payload,
-      $created_at: snapshot.created_at,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        snapshot.id, snapshot.notion_page_id, snapshot.linkedin_post_urn ?? null,
+        snapshot.checkpoint ?? null, snapshot.captured_at, snapshot.post_age_minutes ?? null,
+        snapshot.impressions ?? null, snapshot.reach ?? null, snapshot.reactions ?? null,
+        snapshot.comments ?? null, snapshot.shares ?? null, snapshot.saves ?? null,
+        snapshot.sends ?? null, snapshot.profile_views ?? null, snapshot.followers_gained ?? null,
+        snapshot.link_clicks ?? null, snapshot.premium_cta_clicks ?? null,
+        snapshot.source, snapshot.raw_payload, snapshot.created_at,
+      ],
     });
   }
 
-  findByNotionPageId(notionPageId: string): AnalyticsSnapshot[] {
-    return this.db.prepare(
-      'SELECT * FROM analytics_snapshots WHERE notion_page_id = $id ORDER BY captured_at DESC',
-    ).all({ $id: notionPageId }) as unknown as AnalyticsSnapshot[];
+  async findByNotionPageId(notionPageId: string): Promise<AnalyticsSnapshot[]> {
+    const result = await this.db.execute({
+      sql: 'SELECT * FROM analytics_snapshots WHERE notion_page_id = ? ORDER BY captured_at DESC',
+      args: [notionPageId],
+    });
+    return result.rows.map(r => rowToSnapshot(r as unknown as Record<string, unknown>));
   }
 
-  findAll(): AnalyticsSnapshot[] {
-    return this.db.prepare(
+  async findAll(): Promise<AnalyticsSnapshot[]> {
+    const result = await this.db.execute(
       'SELECT * FROM analytics_snapshots ORDER BY created_at DESC',
-    ).all() as unknown as AnalyticsSnapshot[];
+    );
+    return result.rows.map(r => rowToSnapshot(r as unknown as Record<string, unknown>));
   }
 
-  existsById(id: string): boolean {
-    const row = this.db.prepare(
-      'SELECT 1 FROM analytics_snapshots WHERE id = $id',
-    ).get({ $id: id });
-    return row !== undefined;
+  async existsById(id: string): Promise<boolean> {
+    const result = await this.db.execute({
+      sql: 'SELECT 1 FROM analytics_snapshots WHERE id = ?',
+      args: [id],
+    });
+    return result.rows.length > 0;
   }
 }

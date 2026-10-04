@@ -1,17 +1,10 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
-import { applyMigrations } from '../storage/schema.js';
+import { openDatabase } from '../storage/database.js';
 import { PublicationRepository } from '../storage/publicationRepository.js';
 import { QueueService } from '../scheduling/queueService.js';
 import { silentLogger, post } from './helpers.js';
 import type { NotionRepository } from '../notion/notionRepository.js';
 import type { NotionClient } from '../notion/notionClient.js';
-
-function makeDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:');
-  applyMigrations(db);
-  return db;
-}
 
 function makeNotion(getSchemaType: 'select' | 'status' = 'select'): NotionClient {
   return {
@@ -28,7 +21,7 @@ function makeRepo(posts: ReturnType<typeof post>[]): NotionRepository {
 
 describe('QueueService', () => {
   it('enfileira post elegível e atualiza Notion para Agendado', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const pubRepo = new PublicationRepository(db);
     const notion = makeNotion();
     const svc = new QueueService(makeRepo([post()]), pubRepo, notion, silentLogger);
@@ -42,14 +35,14 @@ describe('QueueService', () => {
       expect.any(String),
       { Status: { select: { name: 'Agendado' } } },
     );
-    const all = pubRepo.findAll();
+    const all = await pubRepo.findAll();
     expect(all).toHaveLength(1);
     expect(all[0]!.operational_state).toBe('queued');
     db.close();
   });
 
   it('usa o tipo correto para status-type databases', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const notion = makeNotion('status');
     const svc = new QueueService(makeRepo([post()]), new PublicationRepository(db), notion, silentLogger);
 
@@ -63,7 +56,7 @@ describe('QueueService', () => {
   });
 
   it('pula post já enfileirado (idempotência)', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const pubRepo = new PublicationRepository(db);
     const notion = makeNotion();
     const svc = new QueueService(makeRepo([post()]), pubRepo, notion, silentLogger);
@@ -75,12 +68,12 @@ describe('QueueService', () => {
 
     expect(result.queued).toBe(0);
     expect(result.skipped).toBe(1);
-    expect(pubRepo.findAll()).toHaveLength(1);
+    expect(await pubRepo.findAll()).toHaveLength(1);
     db.close();
   });
 
   it('falha de getReadyPosts retorna errors=1 sem lançar', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const failingRepo = { getReadyPosts: vi.fn().mockRejectedValue(new Error('NOTION_NETWORK_ERROR')) } as unknown as NotionRepository;
     const svc = new QueueService(failingRepo, new PublicationRepository(db), makeNotion(), silentLogger);
 
@@ -92,7 +85,7 @@ describe('QueueService', () => {
   });
 
   it('falha de updateProperties não aborta o enfileiramento', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const notion = {
       getSchema: vi.fn().mockResolvedValue({ Status: { type: 'select' } }),
       updateProperties: vi.fn().mockRejectedValue(new Error('NOTION_TIMEOUT')),
@@ -101,9 +94,8 @@ describe('QueueService', () => {
 
     const result = await svc.enqueueEligiblePosts();
 
-    // Post foi enfileirado no SQLite mesmo com falha na atualização do Notion
     expect(result.queued).toBe(1);
-    expect(new PublicationRepository(db).findAll()).toHaveLength(1);
+    expect(await new PublicationRepository(db).findAll()).toHaveLength(1);
     db.close();
   });
 });

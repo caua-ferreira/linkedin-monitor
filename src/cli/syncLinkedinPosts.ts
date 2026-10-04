@@ -69,7 +69,7 @@ Exemplo:
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
   const dryRun = env.DRY_RUN === 'true';
 
-  const db = openDatabase(env.DATABASE_PATH);
+  const db = await openDatabase(env.DATABASE_PATH);
   const pubRepo = new PublicationRepository(db);
   const notionClient = new NotionClient({
     token: env.NOTION_TOKEN, dataSourceId: env.NOTION_DATA_SOURCE_ID,
@@ -182,9 +182,9 @@ Exemplo:
       continue;
     }
 
-    if (!pubRepo.findByNotionPageId(m.notionPageId)) {
+    if (!await pubRepo.findByNotionPageId(m.notionPageId)) {
       const publishedAt = midnightSpIso(m.publishedAt);
-      pubRepo.insert({
+      await pubRepo.insert({
         id: randomUUID(), notion_page_id: m.notionPageId,
         idempotency_key: `${m.notionPageId}:linkedin_sync`,
         operational_state: 'published', scheduled_at: publishedAt,

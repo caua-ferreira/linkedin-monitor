@@ -1,13 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
-import { applyMigrations } from '../storage/schema.js';
+import { openDatabase } from '../storage/database.js';
+import type { Client } from '@libsql/client';
 import { AnalyticsRepository } from '../storage/analyticsRepository.js';
 import type { AnalyticsSnapshot } from '../analytics/analyticsModels.js';
 
-function makeDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:');
-  applyMigrations(db);
-  return db;
+async function makeDb(): Promise<Client> {
+  return openDatabase(':memory:');
 }
 
 function makeSnapshot(overrides: Partial<AnalyticsSnapshot> = {}): AnalyticsSnapshot {
@@ -37,48 +35,48 @@ function makeSnapshot(overrides: Partial<AnalyticsSnapshot> = {}): AnalyticsSnap
 }
 
 describe('AnalyticsRepository', () => {
-  let db: DatabaseSync;
+  let db: Client;
   let repo: AnalyticsRepository;
 
-  beforeEach(() => {
-    db = makeDb();
+  beforeEach(async () => {
+    db = await makeDb();
     repo = new AnalyticsRepository(db);
   });
   afterEach(() => db.close());
 
-  it('insere e recupera snapshot por notion_page_id', () => {
+  it('insere e recupera snapshot por notion_page_id', async () => {
     const snap = makeSnapshot();
-    repo.insert(snap);
-    const found = repo.findByNotionPageId('notion-abc');
+    await repo.insert(snap);
+    const found = await repo.findByNotionPageId('notion-abc');
     expect(found).toHaveLength(1);
     expect(found[0]!.id).toBe('test-id-1');
     expect(found[0]!.impressions).toBe(500);
     expect(found[0]!.checkpoint).toBe('24h');
   });
 
-  it('existsById retorna true após insert', () => {
-    repo.insert(makeSnapshot());
-    expect(repo.existsById('test-id-1')).toBe(true);
-    expect(repo.existsById('outro-id')).toBe(false);
+  it('existsById retorna true após insert', async () => {
+    await repo.insert(makeSnapshot());
+    expect(await repo.existsById('test-id-1')).toBe(true);
+    expect(await repo.existsById('outro-id')).toBe(false);
   });
 
-  it('findAll retorna todos os snapshots', () => {
-    repo.insert(makeSnapshot({ id: 'id-1', notion_page_id: 'page-1' }));
-    repo.insert(makeSnapshot({ id: 'id-2', notion_page_id: 'page-2' }));
-    expect(repo.findAll()).toHaveLength(2);
+  it('findAll retorna todos os snapshots', async () => {
+    await repo.insert(makeSnapshot({ id: 'id-1', notion_page_id: 'page-1' }));
+    await repo.insert(makeSnapshot({ id: 'id-2', notion_page_id: 'page-2' }));
+    expect(await repo.findAll()).toHaveLength(2);
   });
 
-  it('preserva valores null corretamente', () => {
+  it('preserva valores null corretamente', async () => {
     const snap = makeSnapshot({ sends: null, premium_cta_clicks: null, linkedin_post_urn: null });
-    repo.insert(snap);
-    const found = repo.findByNotionPageId('notion-abc')[0]!;
+    await repo.insert(snap);
+    const found = (await repo.findByNotionPageId('notion-abc'))[0]!;
     expect(found.sends).toBeNull();
     expect(found.premium_cta_clicks).toBeNull();
     expect(found.linkedin_post_urn).toBeNull();
   });
 
-  it('lança erro em id duplicado', () => {
-    repo.insert(makeSnapshot());
-    expect(() => repo.insert(makeSnapshot())).toThrow();
+  it('lança erro em id duplicado', async () => {
+    await repo.insert(makeSnapshot());
+    await expect(repo.insert(makeSnapshot())).rejects.toThrow();
   });
 });

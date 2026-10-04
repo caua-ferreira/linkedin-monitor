@@ -4,20 +4,19 @@
  *   LOCAL  → data/inbox/          (salvar arquivo na máquina)
  *   DRIVE  → GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID (salvar pelo celular)
  *
- * Suporta dois formatos de exportação do LinkedIn:
- *   - All Posts Analytics: uma linha por post (métricas acumuladas)
- *   - Single Post Analytics: várias linhas por post (breakdown diário)
- *     → deduplicado automaticamente, mantém a linha com mais impressões
+ * Tracking de arquivos Drive já processados:
+ *   - SUPABASE_URL + SUPABASE_ANON_KEY definidos → usa Supabase (cloud, persiste entre runs)
+ *   - Caso contrário → usa tabela drive_processed_files no SQLite local
  *
- * Matching automático:
- *   1. Tenta casar pelo campo "Post URL" no Notion
- *   2. Fallback: casa pela "Data" do post no Notion e preenche Post URL automaticamente
+ * Flags:
+ *   --once   Executa um único tick e sai (para GitHub Actions / Task Scheduler)
  */
-import { readdirSync, readFileSync, writeFileSync, mkdirSync, renameSync, statSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, mkdirSync, renameSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadEnv } from '../config/env.js';
 import { createLogger } from '../utils/logger.js';
 import { openDatabase } from '../storage/database.js';
+import type { Client } from '@libsql/client';
 import { AnalyticsRepository } from '../storage/analyticsRepository.js';
 import { NotionClient } from '../notion/notionClient.js';
 import { mapPage } from '../notion/notionRepository.js';
@@ -30,13 +29,55 @@ const POLL_MS = 60_000;
 
 function ensureDir(dir: string) { mkdirSync(dir, { recursive: true }); }
 
-function loadProcessedDriveIds(path: string): Set<string> {
-  try { return new Set(JSON.parse(readFileSync(path, 'utf8')) as string[]); } catch { return new Set(); }
+// --- DriveTracker abstraction ---
+
+interface DriveTracker {
+  has(fileId: string): Promise<boolean>;
+  mark(fileId: string): Promise<void>;
 }
 
-function saveProcessedDriveIds(path: string, ids: Set<string>) {
-  writeFileSync(path, JSON.stringify([...ids], null, 2), 'utf8');
+function makeSupabaseTracker(supabaseUrl: string, anonKey: string): DriveTracker {
+  const endpoint = `${supabaseUrl}/rest/v1/drive_processed_files`;
+  const headers: Record<string, string> = {
+    'apikey': anonKey,
+    'Authorization': `Bearer ${anonKey}`,
+    'Content-Type': 'application/json',
+  };
+  return {
+    async has(fileId) {
+      const res = await fetch(`${endpoint}?drive_file_id=eq.${encodeURIComponent(fileId)}&select=drive_file_id`, { headers });
+      const rows = await res.json() as unknown[];
+      return rows.length > 0;
+    },
+    async mark(fileId) {
+      await fetch(endpoint, {
+        method: 'POST',
+        headers: { ...headers, 'Prefer': 'resolution=ignore-duplicates' },
+        body: JSON.stringify({ drive_file_id: fileId, processed_at: new Date().toISOString() }),
+      });
+    },
+  };
 }
+
+function makeSqliteTracker(db: Client): DriveTracker {
+  return {
+    async has(fileId) {
+      const result = await db.execute({
+        sql: 'SELECT 1 FROM drive_processed_files WHERE drive_file_id = ?',
+        args: [fileId],
+      });
+      return result.rows.length > 0;
+    },
+    async mark(fileId) {
+      await db.execute({
+        sql: 'INSERT OR IGNORE INTO drive_processed_files (drive_file_id, processed_at) VALUES (?, ?)',
+        args: [fileId, new Date().toISOString()],
+      });
+    },
+  };
+}
+
+// --- Processing ---
 
 async function processBuffer(
   buffer: Buffer,
@@ -71,9 +112,7 @@ async function processBuffer(
     }, new Map())
     .values(),
   ];
-  // Preserva linhas sem URL para contagem de skipped
   skipped += parsed.rows.length - parsed.rows.filter(r => r.postUrl).length;
-  // Linhas com URL mas descartadas na dedup
   skipped += parsed.rows.filter(r => r.postUrl).length - dedupedRows.length;
 
   for (const row of dedupedRows) {
@@ -93,7 +132,6 @@ async function processBuffer(
         const match = candidates.length === 1 ? candidates[0]! : published.length === 1 ? published[0]! : null;
         if (match) {
           notionPageId = match.id;
-          // Preenche Post URL no Notion para próximas execuções
           if (!dryRun) {
             try { await notionClient.updateProperties(match.id, { 'Post URL': { url: row.postUrl! } }); } catch { /* não bloqueia */ }
           }
@@ -177,7 +215,7 @@ async function pollLocal(
 
 async function pollDrive(
   driveClient: GoogleDriveClient, folderId: string,
-  processedIdsPath: string, processedIds: Set<string>,
+  tracker: DriveTracker,
   analyticsRepo: AnalyticsRepository, notionClient: NotionClient,
   dryRun: boolean, logger: ReturnType<typeof createLogger>,
 ): Promise<void> {
@@ -194,7 +232,7 @@ async function pollDrive(
   );
 
   for (const file of xlsxFiles) {
-    if (processedIds.has(file.id)) continue;
+    if (await tracker.has(file.id)) continue;
 
     let buffer: Buffer;
     try {
@@ -211,8 +249,7 @@ async function pollDrive(
     logger.info({ action: 'inbox_drive_done', file: file.name, driveId: file.id, saved, skipped, dryRun });
 
     if (!dryRun) {
-      processedIds.add(file.id);
-      saveProcessedDriveIds(processedIdsPath, processedIds);
+      await tracker.mark(file.id);
       process.stdout.write(`✓ [drive] ${file.name}: ${saved} snapshot(s) salvo(s).\n`);
     } else {
       process.stdout.write(`[dry-run] [drive] ${file.name}: ${saved} calculado(s), ${skipped} ignorado(s).\n`);
@@ -221,6 +258,7 @@ async function pollDrive(
 }
 
 async function main() {
+  const once = process.argv.includes('--once');
   const env = loadEnv(process.env);
   const logger = createLogger(env.DATA_DIR, env.LOG_LEVEL);
   const dryRun = env.DRY_RUN === 'true';
@@ -228,43 +266,51 @@ async function main() {
   const inboxDir = join(env.DATA_DIR, 'inbox');
   const processedDir = join(env.DATA_DIR, 'processed');
   const failedDir = join(env.DATA_DIR, 'failed');
-  const processedIdsPath = join(env.DATA_DIR, 'drive-processed.json');
   ensureDir(inboxDir);
 
-  const db = openDatabase(env.DATABASE_PATH);
+  const db = await openDatabase(env.DATABASE_PATH);
   const analyticsRepo = new AnalyticsRepository(db);
   const notionClient = new NotionClient({
     token: env.NOTION_TOKEN, dataSourceId: env.NOTION_DATA_SOURCE_ID,
     version: env.NOTION_API_VERSION, dryRun, logger,
   });
 
+  // Usa Supabase para tracking de Drive quando vars disponíveis, SQLite caso contrário
+  const tracker: DriveTracker = (env.SUPABASE_URL && env.SUPABASE_ANON_KEY)
+    ? makeSupabaseTracker(env.SUPABASE_URL, env.SUPABASE_ANON_KEY)
+    : makeSqliteTracker(db);
+
   const hasDrive = Boolean(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH && env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID);
   let driveClient: GoogleDriveClient | null = null;
-  let processedIds = new Set<string>();
 
   if (hasDrive) {
     if (!existsSync(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH)) {
       process.stdout.write(`AVISO: GOOGLE_SERVICE_ACCOUNT_KEY_PATH não encontrado — Drive desativado.\n`);
     } else {
       driveClient = new GoogleDriveClient(env.GOOGLE_SERVICE_ACCOUNT_KEY_PATH);
-      processedIds = loadProcessedDriveIds(processedIdsPath);
       process.stdout.write(`Drive inbox: pasta ${env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID}\n`);
     }
   }
 
   if (dryRun) process.stdout.write('AVISO: DRY_RUN=true — snapshots calculados mas NÃO salvos.\n\n');
 
-  process.stdout.write(`Monitorando ${inboxDir} (intervalo: ${POLL_MS / 1000}s)\n`);
-  if (driveClient) process.stdout.write('Drive inbox ativo — salve o XLSX no Drive pelo celular ou computador.\n');
-  process.stdout.write('Ctrl+C para encerrar.\n\n');
-
   const tick = async () => {
     await pollLocal(inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger);
     if (driveClient) {
       await pollDrive(driveClient, env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID,
-        processedIdsPath, processedIds, analyticsRepo, notionClient, dryRun, logger);
+        tracker, analyticsRepo, notionClient, dryRun, logger);
     }
   };
+
+  if (once) {
+    await tick();
+    db.close();
+    return;
+  }
+
+  process.stdout.write(`Monitorando ${inboxDir} (intervalo: ${POLL_MS / 1000}s)\n`);
+  if (driveClient) process.stdout.write('Drive inbox ativo — salve o XLSX no Drive pelo celular ou computador.\n');
+  process.stdout.write('Ctrl+C para encerrar.\n\n');
 
   await tick();
   setInterval(() => { tick().catch(e => logger.error({ action: 'watch_tick_failed', error: e instanceof Error ? e.message : String(e) })); }, POLL_MS);

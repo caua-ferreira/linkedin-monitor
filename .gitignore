@@ -16,3 +16,10 @@ logs/
 *.zip
 .claude/
 
+
+secrets/
+auth
+auth-wal
+info/
+.vercel
+.env*

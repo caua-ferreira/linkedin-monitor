@@ -60,7 +60,7 @@ export async function saveSnapshot(
     created_at: now,
   };
 
-  repo.insert(snapshot);
+  await repo.insert(snapshot);
   logger.info({
     action: 'analytics_saved',
     notion_page_id: snapshot.notion_page_id,

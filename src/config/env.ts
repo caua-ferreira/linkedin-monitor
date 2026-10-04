@@ -19,8 +19,12 @@ const schema = z.object({
   GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z.string().default(''),
   GOOGLE_DRIVE_FOLDER_ID: z.string().default(''),
   GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID: z.string().default(''),
+  TURSO_DATABASE_URL: z.string().default(''),
+  TURSO_AUTH_TOKEN: z.string().default(''),
   BRAINFROST_BASE_URL: z.string().default('https://www.brainfrost.com.br/'),
   BRAINFROST_UTM_CAMPAIGN: z.string().default('brainfrost_beta'),
+  SUPABASE_URL: z.string().default(''),
+  SUPABASE_ANON_KEY: z.string().default(''),
 });
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env, requireToken = true) {

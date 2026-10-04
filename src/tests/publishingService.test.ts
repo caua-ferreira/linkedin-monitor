@@ -1,23 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
-import { DatabaseSync } from 'node:sqlite';
-import { applyMigrations } from '../storage/schema.js';
+import { openDatabase } from '../storage/database.js';
+import type { Client } from '@libsql/client';
 import { TokenRepository } from '../storage/tokenRepository.js';
 import { PublicationRepository } from '../storage/publicationRepository.js';
 import { publishPost } from '../publishing/publishingService.js';
 import { silentLogger, post } from './helpers.js';
 
-function makeDb(): DatabaseSync {
-  const db = new DatabaseSync(':memory:');
-  applyMigrations(db);
-  return db;
-}
-
 const oauthConfig = { clientId: 'c', clientSecret: 's', redirectUri: 'http://localhost/cb' };
 const apiVersion = '202501';
 
-function tokenRepo(db: DatabaseSync): TokenRepository {
+async function tokenRepo(db: Client): Promise<TokenRepository> {
   const repo = new TokenRepository(db);
-  repo.save({
+  await repo.save({
     member_urn: 'urn:li:person:test',
     access_token: 'valid-token',
     access_token_expires_at: new Date(Date.now() + 60 * 60_000).toISOString(),
@@ -38,10 +32,10 @@ const notionMock = {
 
 describe('publishPost — DRY RUN', () => {
   it('retorna prévia sem chamar LinkedIn', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const result = await publishPost(post(), {
       dryRun: true,
-      tokenRepo: tokenRepo(db),
+      tokenRepo: await tokenRepo(db),
       publicationRepo: new PublicationRepository(db),
       notion: notionMock,
       oauthConfig,
@@ -59,7 +53,7 @@ describe('publishPost — DRY RUN', () => {
 
 describe('publishPost — LIVE', () => {
   it('publica, persiste URN e atualiza Notion', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const mockFetch = async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.includes('/v2/userinfo')) {
@@ -77,7 +71,7 @@ describe('publishPost — LIVE', () => {
 
     const result = await publishPost(post(), {
       dryRun: false,
-      tokenRepo: tokenRepo(db),
+      tokenRepo: await tokenRepo(db),
       publicationRepo: new PublicationRepository(db),
       notion: notionMock,
       oauthConfig,
@@ -93,14 +87,14 @@ describe('publishPost — LIVE', () => {
     }
 
     // URN deve estar salvo no SQLite
-    const pub = new PublicationRepository(db).findByNotionPageId(post().id);
+    const pub = await new PublicationRepository(db).findByNotionPageId(post().id);
     expect(pub?.linkedin_post_urn).toBe('urn:li:share:123456');
     expect(pub?.operational_state).toBe('published');
     db.close();
   });
 
   it('bloqueia sem token armazenado', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     await expect(publishPost(post(), {
       dryRun: false,
       tokenRepo: new TokenRepository(db),
@@ -114,9 +108,9 @@ describe('publishPost — LIVE', () => {
   });
 
   it('bloqueia post já tentado pela mesma chave de idempotência', async () => {
-    const db = makeDb();
+    const db = await openDatabase(':memory:');
     const pubRepo = new PublicationRepository(db);
-    pubRepo.insert({
+    await pubRepo.insert({
       id: 'existing',
       notion_page_id: post().id,
       idempotency_key: `${post().id}:2026-10-02T15:20:00.000Z`,
@@ -130,7 +124,7 @@ describe('publishPost — LIVE', () => {
 
     await expect(publishPost(post(), {
       dryRun: false,
-      tokenRepo: tokenRepo(db),
+      tokenRepo: await tokenRepo(db),
       publicationRepo: pubRepo,
       notion: notionMock,
       oauthConfig,
