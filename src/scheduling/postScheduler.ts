@@ -61,7 +61,8 @@ export class PostScheduler {
         result.published++;
       } catch (error) {
         const code = error instanceof SafeError ? error.code : 'UNKNOWN';
-        this.logger.error({ action: 'scheduler_publish_failed', pubId: pub.id, notionPageId: pub.notion_page_id, code });
+        const msg = error instanceof Error ? error.message : String(error);
+        this.logger.error({ action: 'scheduler_publish_failed', pubId: pub.id, notionPageId: pub.notion_page_id, code, msg });
         result.errors++;
         // Continua para o próximo — falha de um post não aborta os demais.
       }
