@@ -34,8 +34,12 @@ jobs:
         run: mkdir -p data secrets
 
       - name: Escreve chave Google Service Account
-        if: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY != '' }}
-        run: echo '${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}' > secrets/google-service-account.json
+        env:
+          GOOGLE_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          if [ -n "$GOOGLE_KEY" ]; then
+            echo "$GOOGLE_KEY" > secrets/google-service-account.json
+          fi
 
       - name: Roda scheduler --once
         env:
