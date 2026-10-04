@@ -61,6 +61,16 @@ export class NotionRepository {
     return { ...post, text: result.text, contentErrors: result.errors };
   }
 
+  async getPostsByDateWithoutMedia(date: string): Promise<EditorialPost[]> {
+    const pages = await this.client.queryWithFilter({
+      and: [
+        { property: 'Data', date: { equals: date } },
+        { property: 'Mídia URL', url: { is_empty: true } },
+      ],
+    });
+    return pages.flatMap(p => { try { return [mapPage(p)]; } catch { return []; } });
+  }
+
   async getReadyPosts(): Promise<EditorialPost[]> {
     const properties = await this.client.getSchema();
     if (schemaProblems(properties).length) throw new SafeError('NOTION_SCHEMA_MISMATCH_RUN_NOTION_CHECK');

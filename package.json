@@ -18,6 +18,7 @@
     "collect": "tsx src/cli/importLinkedinReport.ts",
     "auth:start": "tsx src/cli/startAuth.ts",
     "auth:status": "tsx src/cli/authStatus.ts",
+    "drive:link": "tsx src/cli/linkDriveAssets.ts",
     "build": "tsc"
   },
   "dependencies": {
@@ -25,6 +26,7 @@
     "date-fns-tz": "^3.2.0",
     "dotenv": "^18.0.5",
     "express": "^5.2.1",
+    "googleapis": "^183.0.0",
     "pino": "^10.3.1",
     "xlsx": "^0.18.5",
     "zod": "^4.6.5"

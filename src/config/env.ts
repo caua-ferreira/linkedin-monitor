@@ -16,6 +16,8 @@ const schema = z.object({
   LINKEDIN_API_VERSION: z.preprocess(v => (v === '' ? undefined : v), z.string().regex(/^\d{6}$/).default('202501')),
   API_PORT: z.coerce.number().int().min(1024).max(65535).default(3000),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error', 'silent']).default('info'),
+  GOOGLE_SERVICE_ACCOUNT_KEY_PATH: z.string().default(''),
+  GOOGLE_DRIVE_FOLDER_ID: z.string().default(''),
 });
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env, requireToken = true) {

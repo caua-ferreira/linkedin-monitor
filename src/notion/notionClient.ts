@@ -99,6 +99,13 @@ export class NotionClient {
     return parsed.data;
   }
 
+  async queryWithFilter(filter: unknown): Promise<NotionPage[]> {
+    const results = await this.list('POST', `databases/${encodeURIComponent(this.options.dataSourceId)}/query`, { filter });
+    const parsed = z.array(pageSchema).safeParse(results);
+    if (!parsed.success) throw new SafeError('NOTION_INVALID_PAGES');
+    return parsed.data;
+  }
+
   async getPage(pageId: string): Promise<NotionPage> {
     const parsed = pageSchema.safeParse(await this.request('GET', `pages/${encodeURIComponent(pageId)}`));
     if (!parsed.success) throw new SafeError('NOTION_INVALID_PAGE');

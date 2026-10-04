@@ -1,4 +1,5 @@
 import { SafeError } from '../utils/errors.js';
+import { GoogleDriveClient } from '../integrations/googleDriveClient.js';
 import type { LinkedInClient } from './linkedinClient.js';
 
 export type MediaType = 'image' | 'video' | 'document';
@@ -17,7 +18,17 @@ interface InitDocumentResponse {
   value: { uploadUrl: string; document: string };
 }
 
-async function downloadMedia(url: string, fetchFn: typeof fetch): Promise<{ buffer: Buffer; contentType: string }> {
+async function downloadMedia(
+  url: string,
+  fetchFn: typeof fetch,
+  driveClient?: GoogleDriveClient,
+): Promise<{ buffer: Buffer; contentType: string }> {
+  if (GoogleDriveClient.isGoogleDriveUrl(url)) {
+    if (!driveClient) throw new SafeError('GOOGLE_DRIVE_CLIENT_NOT_CONFIGURED');
+    const fileId = GoogleDriveClient.extractFileId(url);
+    if (!fileId) throw new SafeError('GOOGLE_DRIVE_INVALID_URL');
+    return driveClient.downloadFile(fileId);
+  }
   let response: Response;
   try {
     response = await fetchFn(url, { signal: AbortSignal.timeout(30_000) });
@@ -56,8 +67,9 @@ export async function uploadImage(
   memberUrn: string,
   client: LinkedInClient,
   fetchFn: typeof fetch = fetch,
+  driveClient?: GoogleDriveClient,
 ): Promise<string> {
-  const { buffer, contentType } = await downloadMedia(mediaUrl, fetchFn);
+  const { buffer, contentType } = await downloadMedia(mediaUrl, fetchFn, driveClient);
 
   const init = await client.request<InitImageResponse>(
     'POST',
@@ -73,8 +85,9 @@ export async function uploadDocument(
   memberUrn: string,
   client: LinkedInClient,
   fetchFn: typeof fetch = fetch,
+  driveClient?: GoogleDriveClient,
 ): Promise<string> {
-  const { buffer, contentType } = await downloadMedia(mediaUrl, fetchFn);
+  const { buffer, contentType } = await downloadMedia(mediaUrl, fetchFn, driveClient);
 
   const init = await client.request<InitDocumentResponse>(
     'POST',
@@ -90,8 +103,9 @@ export async function uploadVideo(
   memberUrn: string,
   client: LinkedInClient,
   fetchFn: typeof fetch = fetch,
+  driveClient?: GoogleDriveClient,
 ): Promise<string> {
-  const { buffer, contentType } = await downloadMedia(mediaUrl, fetchFn);
+  const { buffer, contentType } = await downloadMedia(mediaUrl, fetchFn, driveClient);
 
   const init = await client.request<InitVideoResponse>(
     'POST',
@@ -141,11 +155,12 @@ export async function uploadMediaAsset(
   memberUrn: string,
   client: LinkedInClient,
   fetchFn: typeof fetch = fetch,
+  driveClient?: GoogleDriveClient,
 ): Promise<string> {
   switch (mediaType) {
-    case 'image': return uploadImage(mediaUrl, memberUrn, client, fetchFn);
-    case 'video': return uploadVideo(mediaUrl, memberUrn, client, fetchFn);
-    case 'document': return uploadDocument(mediaUrl, memberUrn, client, fetchFn);
+    case 'image': return uploadImage(mediaUrl, memberUrn, client, fetchFn, driveClient);
+    case 'video': return uploadVideo(mediaUrl, memberUrn, client, fetchFn, driveClient);
+    case 'document': return uploadDocument(mediaUrl, memberUrn, client, fetchFn, driveClient);
   }
 }
 
