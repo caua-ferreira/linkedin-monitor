@@ -17,7 +17,7 @@ export function validatePostForPublishing(post: EditorialPost) {
   if (!post.text.trim()) errors.push('TEXT_MISSING');
   if (post.archived) errors.push('PAGE_ARCHIVED');
   if (!['Aprovado', 'Agendado'].includes(post.status)) errors.push('STATUS_NOT_APPROVED');
-  if (!post.ready) errors.push('NOT_READY');
+  if (!post.ready && post.status !== 'Agendado') errors.push('NOT_READY');
   if (!['Pronta', 'Não precisa'].includes(post.art)) errors.push('ART_NOT_READY');
   if (post.schedulerId || post.postUrl || post.publishedAt || post.status === 'Publicado') errors.push('ALREADY_PUBLISHED_OR_REGISTERED');
   if (post.automationError.trim()) errors.push('BLOCKING_AUTOMATION_ERROR');
