@@ -75,8 +75,13 @@ describe('AnalyticsRepository', () => {
     expect(found.linkedin_post_urn).toBeNull();
   });
 
-  it('lança erro em id duplicado', async () => {
-    await repo.insert(makeSnapshot());
-    await expect(repo.insert(makeSnapshot())).rejects.toThrow();
+  it('ignora snapshot duplicado (mesmo notion_page_id + checkpoint)', async () => {
+    const snap = makeSnapshot();
+    const inserted1 = await repo.insert(snap);
+    const inserted2 = await repo.insert({ ...snap, id: 'outro-uuid' });
+    expect(inserted1).toBe(true);
+    expect(inserted2).toBe(false);
+    const all = await repo.findByNotionPageId('notion-abc');
+    expect(all).toHaveLength(1);
   });
 });

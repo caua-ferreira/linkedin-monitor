@@ -43,9 +43,9 @@ export class AnalyticsRepository {
     return result.rows.map(r => r.checkpoint as string);
   }
 
-  async insert(snapshot: AnalyticsSnapshot): Promise<void> {
-    await this.db.execute({
-      sql: `INSERT INTO analytics_snapshots
+  async insert(snapshot: AnalyticsSnapshot): Promise<boolean> {
+    const result = await this.db.execute({
+      sql: `INSERT OR IGNORE INTO analytics_snapshots
         (id, notion_page_id, linkedin_post_urn, checkpoint, captured_at, post_age_minutes,
          impressions, reach, reactions, comments, shares, saves, sends,
          profile_views, followers_gained, link_clicks, premium_cta_clicks,
@@ -61,6 +61,7 @@ export class AnalyticsRepository {
         snapshot.source, snapshot.raw_payload, snapshot.created_at,
       ],
     });
+    return (result.rowsAffected ?? 0) > 0;
   }
 
   async findByNotionPageId(notionPageId: string): Promise<AnalyticsSnapshot[]> {

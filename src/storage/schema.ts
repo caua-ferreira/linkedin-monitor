@@ -56,5 +56,9 @@ export async function applyMigrations(db: Client): Promise<void> {
       drive_file_id TEXT PRIMARY KEY,
       processed_at TEXT NOT NULL
     );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_snapshots_unique_checkpoint
+      ON analytics_snapshots (notion_page_id, checkpoint)
+      WHERE checkpoint IS NOT NULL;
   `);
 }

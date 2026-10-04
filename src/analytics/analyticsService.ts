@@ -60,7 +60,12 @@ export async function saveSnapshot(
     created_at: now,
   };
 
-  await repo.insert(snapshot);
+  const inserted = await repo.insert(snapshot);
+  if (!inserted) {
+    logger.info({ action: 'analytics_duplicate_skipped', notion_page_id: snapshot.notion_page_id, checkpoint: snapshot.checkpoint });
+    return snapshot;
+  }
+
   logger.info({
     action: 'analytics_saved',
     notion_page_id: snapshot.notion_page_id,
