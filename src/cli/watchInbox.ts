@@ -86,6 +86,7 @@ async function processBuffer(
   notionClient: NotionClient,
   dryRun: boolean,
   logger: ReturnType<typeof createLogger>,
+  supabaseConfig?: { url: string; key: string },
 ): Promise<{ saved: number; skipped: number }> {
   let parsed;
   try {
@@ -178,6 +179,7 @@ async function processBuffer(
         dryRun ? null : notionClient,
         dryRun,
         logger,
+        supabaseConfig,
       );
       saved++;
     } catch (e) {
@@ -193,6 +195,7 @@ async function pollLocal(
   inboxDir: string, processedDir: string, failedDir: string,
   analyticsRepo: AnalyticsRepository, notionClient: NotionClient,
   dryRun: boolean, logger: ReturnType<typeof createLogger>,
+  supabaseConfig?: { url: string; key: string },
 ): Promise<void> {
   let files: string[];
   try { files = readdirSync(inboxDir).filter(f => f.toLowerCase().endsWith('.xlsx')); }
@@ -203,7 +206,7 @@ async function pollLocal(
     try { if (Date.now() - statSync(filePath).mtimeMs < 3_000) continue; } catch { continue; }
 
     const { saved, skipped } = await processBuffer(
-      readFileSync(filePath), file, analyticsRepo, notionClient, dryRun, logger,
+      readFileSync(filePath), file, analyticsRepo, notionClient, dryRun, logger, supabaseConfig,
     );
     logger.info({ action: 'inbox_local_done', file, saved, skipped, dryRun });
 
@@ -227,6 +230,7 @@ async function pollDrive(
   tracker: DriveTracker,
   analyticsRepo: AnalyticsRepository, notionClient: NotionClient,
   dryRun: boolean, logger: ReturnType<typeof createLogger>,
+  supabaseConfig?: { url: string; key: string },
 ): Promise<void> {
   let files;
   try { files = await driveClient.listFilesInFolder(folderId); }
@@ -253,7 +257,7 @@ async function pollDrive(
     }
 
     const { saved, skipped } = await processBuffer(
-      buffer, `Drive:${file.name}`, analyticsRepo, notionClient, dryRun, logger,
+      buffer, `Drive:${file.name}`, analyticsRepo, notionClient, dryRun, logger, supabaseConfig,
     );
     logger.info({ action: 'inbox_drive_done', file: file.name, driveId: file.id, saved, skipped, dryRun });
 
@@ -303,11 +307,15 @@ async function main() {
 
   if (dryRun) process.stdout.write('AVISO: DRY_RUN=true — snapshots calculados mas NÃO salvos.\n\n');
 
+  const supabaseConfig = (env.SUPABASE_URL && env.SUPABASE_ANON_KEY)
+    ? { url: env.SUPABASE_URL, key: env.SUPABASE_ANON_KEY }
+    : undefined;
+
   const tick = async () => {
-    await pollLocal(inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger);
+    await pollLocal(inboxDir, processedDir, failedDir, analyticsRepo, notionClient, dryRun, logger, supabaseConfig);
     if (driveClient) {
       await pollDrive(driveClient, env.GOOGLE_DRIVE_ANALYTICS_INBOX_FOLDER_ID,
-        tracker, analyticsRepo, notionClient, dryRun, logger);
+        tracker, analyticsRepo, notionClient, dryRun, logger, supabaseConfig);
     }
   };
 

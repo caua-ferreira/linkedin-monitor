@@ -1,8 +1,16 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import type { Logger } from 'pino';
 import type { AnalyticsRepository } from '../storage/analyticsRepository.js';
 import type { NotionClient } from '../notion/notionClient.js';
 import type { AnalyticsSnapshot, Checkpoint } from './analyticsModels.js';
+
+// ID estável para (notion_page_id, checkpoint) → permite upsert idempotente no Supabase.
+// Posts sem checkpoint (muito novos ou muito antigos) ficam com UUID aleatório.
+function snapshotId(notionPageId: string, checkpoint: string | null): string {
+  if (!checkpoint) return randomUUID();
+  const hex = createHash('sha256').update(`${notionPageId}\0${checkpoint}`).digest('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
 
 export interface SaveSnapshotInput {
   notionPageId: string;
@@ -26,8 +34,8 @@ export interface SaveSnapshotInput {
 }
 
 /**
- * Persiste o snapshot e atualiza o resumo no Notion.
- * Em DRY_RUN, salva no SQLite mas pula a escrita no Notion.
+ * Persiste o snapshot no SQLite, opcionalmente no Supabase, e atualiza o resumo no Notion.
+ * Em DRY_RUN, salva no SQLite mas pula a escrita no Notion e no Supabase.
  */
 export async function saveSnapshot(
   input: SaveSnapshotInput,
@@ -35,10 +43,11 @@ export async function saveSnapshot(
   notion: NotionClient | null,
   dryRun: boolean,
   logger: Logger,
+  supabaseConfig?: { url: string; key: string },
 ): Promise<AnalyticsSnapshot> {
   const now = new Date().toISOString();
   const snapshot: AnalyticsSnapshot = {
-    id: randomUUID(),
+    id: snapshotId(input.notionPageId, input.checkpoint),
     notion_page_id: input.notionPageId,
     linkedin_post_urn: input.linkedinPostUrn,
     checkpoint: input.checkpoint,
@@ -73,6 +82,10 @@ export async function saveSnapshot(
     source: snapshot.source,
   });
 
+  if (supabaseConfig && !dryRun) {
+    await writeToSupabase(snapshot, supabaseConfig, logger);
+  }
+
   if (notion && !dryRun) {
     await updateNotionSummary(snapshot, notion, logger);
   } else if (notion && dryRun) {
@@ -80,6 +93,54 @@ export async function saveSnapshot(
   }
 
   return snapshot;
+}
+
+async function writeToSupabase(
+  snapshot: AnalyticsSnapshot,
+  config: { url: string; key: string },
+  logger: Logger,
+): Promise<void> {
+  try {
+    const res = await fetch(`${config.url}/rest/v1/analytics_snapshots`, {
+      method: 'POST',
+      headers: {
+        'apikey': config.key,
+        'Authorization': `Bearer ${config.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=ignore-duplicates',
+      },
+      body: JSON.stringify({
+        id: snapshot.id,
+        notion_page_id: snapshot.notion_page_id,
+        linkedin_post_urn: snapshot.linkedin_post_urn,
+        checkpoint: snapshot.checkpoint,
+        captured_at: snapshot.captured_at,
+        post_age_minutes: snapshot.post_age_minutes,
+        impressions: snapshot.impressions,
+        reach: snapshot.reach,
+        reactions: snapshot.reactions,
+        comments: snapshot.comments,
+        shares: snapshot.shares,
+        saves: snapshot.saves,
+        sends: snapshot.sends,
+        profile_views: snapshot.profile_views,
+        followers_gained: snapshot.followers_gained,
+        link_clicks: snapshot.link_clicks,
+        premium_cta_clicks: snapshot.premium_cta_clicks,
+        source: snapshot.source,
+        raw_payload: snapshot.raw_payload,
+        created_at: snapshot.created_at,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      logger.warn({ action: 'analytics_supabase_write_failed', status: res.status, body: body.slice(0, 200) });
+    } else {
+      logger.info({ action: 'analytics_supabase_saved', notion_page_id: snapshot.notion_page_id, checkpoint: snapshot.checkpoint });
+    }
+  } catch (e) {
+    logger.warn({ action: 'analytics_supabase_write_failed', error: e instanceof Error ? e.message : String(e) });
+  }
 }
 
 async function updateNotionSummary(
