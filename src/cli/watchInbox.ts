@@ -118,9 +118,14 @@ async function processBuffer(
   for (const row of dedupedRows) {
     // 1. Tenta casar pelo campo Post URL no Notion
     let notionPageId: string | null = null;
+    let notionPublishedAt: string | null = null;
     try {
       const pages = await notionClient.queryWithFilter({ property: 'Post URL', url: { equals: row.postUrl! } });
-      if (pages.length === 1) notionPageId = mapPage(pages[0]!).id;
+      if (pages.length === 1) {
+        const mapped = mapPage(pages[0]!);
+        notionPageId = mapped.id;
+        notionPublishedAt = mapped.publishedAt || null;
+      }
     } catch { /* ignora falha de query */ }
 
     // 2. Fallback: casa pela Data do Notion e preenche Post URL automaticamente
@@ -132,6 +137,7 @@ async function processBuffer(
         const match = candidates.length === 1 ? candidates[0]! : eligible.length === 1 ? eligible[0]! : null;
         if (match) {
           notionPageId = match.id;
+          notionPublishedAt = match.publishedAt || null;
           if (!dryRun) {
             try { await notionClient.updateProperties(match.id, { 'Post URL': { url: row.postUrl! } }); } catch { /* não bloqueia */ }
           }
@@ -146,7 +152,10 @@ async function processBuffer(
       continue;
     }
 
-    const publishedAt = row.publishedAt ?? null;
+    // Usa publishedAt do Notion (datetime completo) para calcular a idade corretamente.
+    // O XLSX exporta só a data (sem hora), o que faz new Date() assumir meia-noite UTC
+    // e distorcer a classificação de checkpoint para posts publicados à tarde/noite.
+    const publishedAt = notionPublishedAt || row.publishedAt || null;
     let postAgeMinutes: number | null = null;
     if (publishedAt) {
       const pub = new Date(publishedAt);
