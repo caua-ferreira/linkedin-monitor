@@ -128,8 +128,8 @@ async function processBuffer(
       try {
         const pages = await notionClient.queryWithFilter({ property: 'Data', date: { equals: row.publishedAt } });
         const candidates = pages.flatMap(p => { try { return [mapPage(p)]; } catch { return []; } });
-        const published = candidates.filter(p => p.status === 'Publicado');
-        const match = candidates.length === 1 ? candidates[0]! : published.length === 1 ? published[0]! : null;
+        const eligible = candidates.filter(p => ['Publicado', 'Agendado'].includes(p.status));
+        const match = candidates.length === 1 ? candidates[0]! : eligible.length === 1 ? eligible[0]! : null;
         if (match) {
           notionPageId = match.id;
           if (!dryRun) {
