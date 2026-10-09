@@ -245,7 +245,10 @@ async function pollDrive(
   );
 
   for (const file of xlsxFiles) {
-    if (await tracker.has(file.id)) continue;
+    let alreadyProcessed = false;
+    try { alreadyProcessed = await tracker.has(file.id); }
+    catch (e) { logger.warn({ action: 'drive_tracker_has_failed', file: file.name, error: e instanceof Error ? e.message : String(e) }); }
+    if (alreadyProcessed) continue;
 
     let buffer: Buffer;
     try {
@@ -262,7 +265,8 @@ async function pollDrive(
     logger.info({ action: 'inbox_drive_done', file: file.name, driveId: file.id, saved, skipped, dryRun });
 
     if (!dryRun) {
-      await tracker.mark(file.id);
+      try { await tracker.mark(file.id); }
+      catch (e) { logger.warn({ action: 'drive_tracker_mark_failed', file: file.name, error: e instanceof Error ? e.message : String(e) }); }
       process.stdout.write(`✓ [drive] ${file.name}: ${saved} snapshot(s) salvo(s).\n`);
     } else {
       process.stdout.write(`[dry-run] [drive] ${file.name}: ${saved} calculado(s), ${skipped} ignorado(s).\n`);

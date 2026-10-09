@@ -23,11 +23,13 @@ jobs:
 
       - run: npm ci
 
+      - name: Cria pastas necessárias
+        run: mkdir -p data secrets
+
       - name: Escreve chave do Google Service Account
         env:
           GOOGLE_KEY: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_KEY }}
         run: |
-          mkdir -p secrets
           printenv GOOGLE_KEY > secrets/google-service-account.json
 
       - name: Roda watch:inbox --once
